@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 from uuid import UUID
+from datetime import datetime
 
 class InterviewBase(BaseModel):
     company_name: str
@@ -19,8 +20,8 @@ class InterviewUpdate(InterviewBase):
 
 class InterviewOut(InterviewBase):
     id: UUID
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         orm_mode = True
