@@ -1,11 +1,19 @@
 import fitz  # PyMuPDF
 
-def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    return text
+def extract_text_from_pdf(pdf_bytes: bytes, max_words=1500) -> str:
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+
+        words = text.split()
+        if len(words) > max_words:
+            text = " ".join(words[:max_words])
+        return text
+    except Exception as e:
+        print("❌ Erro ao extrair texto do PDF:", e)
+        return ""
 
 def build_prompt(resume_text: str, job_title: str, seniority: str, description: str = "") -> str:
     return f"""
