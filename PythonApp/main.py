@@ -6,6 +6,7 @@ from openai import OpenAI
 import os
 import traceback
 from worker.tasks import process_resume_feedback
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -48,7 +49,9 @@ def read_interview(interview_id: str, db: Session = Depends(get_db)):
 
 @app.get("/interviews/", response_model=list[schemas.InterviewOut])
 def list_interviews(db: Session = Depends(get_db)):
-    interviews = db.query(models.Interview).all()
+    interviews = db.query(models.Interview)\
+        .order_by(models.Interview.created_at.desc())\
+        .all()
     return interviews
 
 @app.put("/interviews/{interview_id}", response_model=schemas.InterviewOut)
@@ -175,3 +178,21 @@ def get_result(task_id: str):
         return {"feedback": result.get()}
     else:
         return {"detail": "Ainda processando..."}, 202
+
+@app.get("/interviews/next/", response_model=list[schemas.InterviewOut])
+def get_upcoming_interviews(db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    soon = now + timedelta(hours=480)  # pode ajustar para dias ou horas
+    
+    interviews = (
+        db.query(models.Interview)
+        .filter(
+            models.Interview.next_interview_date != None,
+            models.Interview.next_interview_date >= now,
+            models.Interview.next_interview_date <= soon
+        )
+        .order_by(models.Interview.next_interview_date.asc())
+        .all()
+    )
+    
+    return interviews
