@@ -9,9 +9,13 @@ from worker.tasks import process_resume_feedback
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
+from jobs_service import job_router
+
 load_dotenv()
 
 app = FastAPI()
+
+app.include_router(job_router)
 
 task_results = {}
 
