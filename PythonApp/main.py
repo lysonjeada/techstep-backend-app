@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 import models, schemas, database
 from services.interview_generator import extract_text_from_pdf, build_prompt
@@ -7,9 +7,12 @@ import os
 import traceback
 from worker.tasks import process_resume_feedback
 from datetime import datetime, timedelta
-
+from utils.serializers import serialize_list
 from dotenv import load_dotenv
 from jobs_service import job_router
+
+from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer 
 
 load_dotenv()
 
@@ -28,6 +31,14 @@ def get_db():
         yield db
     finally:
         db.close()
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
 
 @app.post("/interviews/", response_model=schemas.InterviewOut)
 def create_interview(interview: schemas.InterviewCreate, db: Session = Depends(get_db)):
@@ -56,7 +67,8 @@ def list_interviews(db: Session = Depends(get_db)):
     interviews = db.query(models.Interview)\
         .order_by(models.Interview.created_at.desc())\
         .all()
-    return interviews
+    
+    return serialize_list(interviews, schemas.InterviewOut)
 
 @app.put("/interviews/{interview_id}", response_model=schemas.InterviewOut)
 def update_interview(interview_id: str, updated: schemas.InterviewUpdate, db: Session = Depends(get_db)):
@@ -186,17 +198,123 @@ def get_result(task_id: str):
 @app.get("/interviews/next/", response_model=list[schemas.InterviewOut])
 def get_upcoming_interviews(db: Session = Depends(get_db)):
     now = datetime.utcnow()
-    soon = now + timedelta(hours=480)  # pode ajustar para dias ou horas
-    
-    interviews = (
-        db.query(models.Interview)
+    soon = now + timedelta(days=120)
+
+    interviews = db.query(models.Interview)\
         .filter(
             models.Interview.next_interview_date != None,
             models.Interview.next_interview_date >= now,
             models.Interview.next_interview_date <= soon
-        )
-        .order_by(models.Interview.next_interview_date.asc())
+        )\
+        .order_by(models.Interview.next_interview_date.asc())\
         .all()
+
+    return serialize_list(interviews, schemas.InterviewOut)
+
+@app.post("/users/register/", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
+def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    """
+    Endpoint para registrar um novo usuário.
+    Requer email, username e senha.
+    A senha é hashed antes de ser armazenada.
+    """
+    # Verifica se o email já existe
+    db_user_email = db.query(models.User).filter(models.User.email == user.email).first()
+    if db_user_email:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email já registrado")
+
+    # Verifica se o username já existe
+    db_user_username = db.query(models.User).filter(models.User.username == user.username).first()
+    if db_user_username:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já existe")
+
+    # Hasheia a senha antes de salvar
+    hashed_password = get_password_hash(user.password)
+    
+    # Cria o novo usuário
+    db_user = models.User(
+        email=user.email,
+        username=user.username,
+        hashed_password=hashed_password
     )
     
-    return interviews
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    return db_user
+
+@app.post("/users/login/", response_model=schemas.UserOut) # Ou um token de acesso para sistemas mais complexos
+def login_user(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
+    """
+    Endpoint para login de usuário.
+    Verifica as credenciais (username e senha) no banco de dados.
+    """
+    db_user = db.query(models.User).filter(models.User.username == user_credentials.username).first()
+
+    if not db_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário ou senha inválidos")
+
+    # Verifica a senha hashed
+    if not verify_password(user_credentials.password, db_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário ou senha inválidos")
+
+    # Retorna os dados do usuário se o login for bem-sucedido
+    # Em um sistema real, aqui você geraria e retornaria um token JWT
+    return db_user
+
+@app.get("/users/{user_id}", response_model=schemas.UserOut)
+def get_user(user_id: str, db: Session = Depends(get_db)):
+    """
+    Endpoint para buscar um usuário pelo ID.
+    """
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    return db_user
+
+@app.put("/users/{user_id}", response_model=schemas.UserOut)
+def update_user(user_id: str, updated_user: schemas.UserUpdate, db: Session = Depends(get_db)):
+    """
+    Endpoint para atualizar as informações de um usuário.
+    Permite atualizar email, username e/ou senha.
+    """
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+
+    # Atualiza email se fornecido e se não for duplicado
+    if updated_user.email is not None and updated_user.email != db_user.email:
+        existing_email_user = db.query(models.User).filter(models.User.email == updated_user.email).first()
+        if existing_email_user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Novo email já está em uso")
+        db_user.email = updated_user.email
+
+    # Atualiza username se fornecido e se não for duplicado
+    if updated_user.username is not None and updated_user.username != db_user.username:
+        existing_username_user = db.query(models.User).filter(models.User.username == updated_user.username).first()
+        if existing_username_user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Novo nome de usuário já está em uso")
+        db_user.username = updated_user.username
+
+    # Atualiza senha se fornecida
+    if updated_user.password is not None:
+        db_user.hashed_password = get_password_hash(updated_user.password)
+
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: str, db: Session = Depends(get_db)):
+    """
+    Endpoint para deletar um usuário pelo ID.
+    Retorna status 204 No Content em caso de sucesso.
+    """
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+    
+    db.delete(db_user)
+    db.commit()
+    return # Retorna 204 No Content automaticamente

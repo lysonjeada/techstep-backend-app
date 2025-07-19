@@ -3,3 +3,10 @@ uvicorn
 celery[redis]
 psycopg2-binary
 python-dotenv
+SQLAlchemy
+PyMuPDF
+openai
+requests
+python-multipart
+passlib[bcrypt]
+python-jose[cryptography]
