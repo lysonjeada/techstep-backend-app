@@ -10,3 +10,4 @@ requests
 python-multipart
 passlib[bcrypt]
 python-jose[cryptography]
+alembic

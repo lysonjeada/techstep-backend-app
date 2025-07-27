@@ -8,8 +8,8 @@ class InterviewBase(BaseModel):
     job_title: str
     job_seniority: str
     location: str
-    last_interview_date: Optional[datetime]
-    next_interview_date: Optional[datetime]
+    last_interview_date: Optional[datetime] = None
+    next_interview_date: Optional[datetime] = None
     notes: Optional[str] = None
     skills: List[str]
 
@@ -82,6 +82,8 @@ class UserOut(UserBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    email: Optional[str]
+    username: Optional[str]
 
     class Config:
         from_attributes = True # Ou orm_mode = True para versões mais antigas do Pydantic

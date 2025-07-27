@@ -218,23 +218,38 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     Requer email, username e senha.
     A senha é hashed antes de ser armazenada.
     """
-    # Verifica se o email já existe
-    db_user_email = db.query(models.User).filter(models.User.email == user.email).first()
+    # --- SANITIZAÇÃO DOS DADOS: REMOVENDO ESPAÇOS EM BRANCO ---
+    # Aplica .strip() para remover espaços em branco no início e no fim
+    cleaned_email = user.email.strip()
+    cleaned_username = user.username.strip()
+    cleaned_password = user.password.strip() # Importante limpar antes de hashear!
+
+    # Opcional: Você pode adicionar validação para garantir que os campos não fiquem vazios
+    # APÓS o strip, se eles forem obrigatórios e não puderem ser apenas espaços.
+    if not cleaned_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email não pode ser vazio.")
+    if not cleaned_username:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome de usuário não pode ser vazio.")
+    if not cleaned_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Senha não pode ser vazia.")
+
+    # Verifica se o email já existe usando o email limpo
+    db_user_email = db.query(models.User).filter(models.User.email == cleaned_email).first()
     if db_user_email:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email já registrado")
 
-    # Verifica se o username já existe
-    db_user_username = db.query(models.User).filter(models.User.username == user.username).first()
+    # Verifica se o username já existe usando o username limpo
+    db_user_username = db.query(models.User).filter(models.User.username == cleaned_username).first()
     if db_user_username:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já existe")
 
-    # Hasheia a senha antes de salvar
-    hashed_password = get_password_hash(user.password)
+    # Hasheia a senha limpa
+    hashed_password = get_password_hash(cleaned_password)
     
-    # Cria o novo usuário
+    # Cria o novo usuário com os dados limpos
     db_user = models.User(
-        email=user.email,
-        username=user.username,
+        email=cleaned_email,
+        username=cleaned_username,
         hashed_password=hashed_password
     )
     
