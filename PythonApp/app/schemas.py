@@ -1,20 +1,20 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-from datetime import datetime
-import uuid 
+from datetime import datetime, date
+from uuid import UUID
+import uuid
 
 class InterviewBase(BaseModel):
     company_name: str
     job_title: str
     job_seniority: str
-    location: str
+    location: Optional[str] = None
     last_interview_date: Optional[datetime] = None
     next_interview_date: Optional[datetime] = None
     notes: Optional[str] = None
-    skills: List[str]
+    skills: List[str] = [""]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class InterviewCreate(InterviewBase):
     pass
@@ -22,42 +22,20 @@ class InterviewCreate(InterviewBase):
 class InterviewUpdate(InterviewBase):
     pass
 
-from pydantic import BaseModel
-from typing import Optional, List
-from datetime import datetime
-from uuid import UUID
-
 class InterviewOut(BaseModel):
     id: UUID
     company_name: str
     job_title: str
     job_seniority: str
     location: Optional[str] = None
-    last_interview_date: Optional[str]
-    next_interview_date: Optional[str]
+    last_interview_date: Optional[date] 
+    next_interview_date: Optional[date]
     notes: Optional[str]
-    skills: Optional[List[str]] = []
+    skills: Optional[List[str]] = None 
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-    @classmethod
-    def from_orm(cls, obj):
-        return cls(
-            id=obj.id,
-            company_name=obj.company_name,
-            job_title=obj.job_title,
-            job_seniority=obj.job_seniority,
-            location=obj.location,
-            last_interview_date=obj.last_interview_date.strftime("%d/%m/%Y") if obj.last_interview_date else None,
-            next_interview_date=obj.next_interview_date.strftime("%d/%m/%Y") if obj.next_interview_date else None,
-            notes=obj.notes,
-            skills=obj.skills or [],
-            created_at=obj.created_at,
-            updated_at=obj.updated_at
-        )
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Novos Schemas para Usuário ---
 
@@ -85,5 +63,4 @@ class UserOut(UserBase):
     email: Optional[str]
     username: Optional[str]
 
-    class Config:
-        from_attributes = True # Ou orm_mode = True para versões mais antigas do Pydantic
+    model_config = ConfigDict(from_attributes=True)
