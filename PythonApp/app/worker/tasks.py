@@ -1,18 +1,22 @@
-# tasks.py
+# app/worker/tasks.py
 
-from .celery_app import celery_app
+# A importação para celery_app permanece como está, pois é necessária para o decorator @celery_app.task
+from .celery_app import celery_app 
 import traceback
-import fitz
+import fitz # Importação para PyMuPDF, se estiver usando para extração de PDF
 from openai import OpenAI
 import os
-from services.interview_generator import extract_text_from_pdf
+# CORREÇÃO AQUI: Ajuste o caminho de importação para extract_text_from_pdf
+# Baseado em discussões anteriores, ele está em app/llm_generation/services.py
+from app.llm_generation.services import extract_text_from_pdf 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI()
+# Mude o nome da instância do cliente OpenAI para evitar conflitos e deixar claro que é para o Celery
+celery_openai_client = OpenAI() 
 
-@celery_app.task(name="worker.tasks.process_resume_feedback")
+@celery_app.task(name="app.worker.tasks.process_resume_feedback") # Nome da tarefa com caminho completo
 def process_resume_feedback(resume_bytes: bytes) -> str:
     try:
         print("📥 Iniciando extração e análise do currículo...")
@@ -37,7 +41,7 @@ def process_resume_feedback(resume_bytes: bytes) -> str:
 
         print("🔍 Enviando prompt para a OpenAI...")
 
-        response = client.chat.completions.create(
+        response = celery_openai_client.chat.completions.create( # Use a instância renomeada
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "Você é um recrutador profissional experiente."},
@@ -52,4 +56,7 @@ def process_resume_feedback(resume_bytes: bytes) -> str:
 
     except Exception as e:
         traceback.print_exc()
-        return "❌ Erro ao gerar feedback do currículo."
+        # É importante levantar a exceção para que o Celery marque a tarefa como falha
+        # e o backend possa obter o status de falha.
+        # Se você retornar uma string de erro, o Celery considerará a tarefa como bem-sucedida com essa string.
+        raise e # Lança a exceção para que o Celery a registre como falha

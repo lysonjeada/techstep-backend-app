@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, Date, Text, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
 import uuid
-from database import Base
+from .database import Base
 
 class Interview(Base):
     __tablename__ = "interviews"
