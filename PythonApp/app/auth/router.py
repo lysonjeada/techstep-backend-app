@@ -99,3 +99,56 @@ def delete_user(user_id: str, db: Session = Depends(get_db)):
     db.delete(db_user)
     db.commit()
     return
+
+# @router.post("/send_verification_code/", status_code=status.HTTP_200_OK)
+# def send_verification_code(email_request: schemas.EmailRequest, db: Session = Depends(get_db)):
+#     """
+#     Gera um código de verificação e o "envia" por e-mail.
+#     """
+#     # Verifica se o e-mail já existe na base de usuários
+#     user = db.query(models.User).filter(models.User.email == email_request.email).first()
+#     if not user:
+#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário com este e-mail não encontrado.")
+
+#     # Gera um novo código de verificação
+#     code = generate_verification_code()
+
+#     # Cria uma nova entrada no banco de dados para o código
+#     db_code = models.VerificationCode(email=email_request.email, code=code)
+#     db.add(db_code)
+#     db.commit()
+#     db.refresh(db_code)
+    
+#     # IMPORTANTE: Este é o ponto onde você integraria um serviço de e-mail real.
+#     # Exemplo: `send_email(email_request.email, "Seu código de verificação é: {code}")`
+    
+#     return {"message": "Código de verificação enviado com sucesso. Verifique seu e-mail."}
+
+# @router.post("/verify_code/", status_code=status.HTTP_200_OK)
+# def verify_code(code_verification: schemas.CodeVerification, db: Session = Depends(get_db)):
+#     """
+#     Valida o código de verificação recebido pelo usuário.
+#     """
+#     # Encontra o código de verificação mais recente para o e-mail fornecido
+#     db_code = db.query(models.VerificationCode).filter(
+#         models.VerificationCode.email == code_verification.email,
+#         models.VerificationCode.code == code_verification.code
+#     ).order_by(models.VerificationCode.created_at.desc()).first()
+
+#     if not db_code:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código de verificação inválido.")
+
+#     # Define o tempo de validade do código (ex: 15 minutos)
+#     expiration_time = datetime.utcnow() - timedelta(minutes=15)
+    
+#     if db_code.created_at < expiration_time:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código de verificação expirado.")
+    
+#     if db_code.is_used:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código de verificação já utilizado.")
+
+#     # Marca o código como usado para evitar reutilização
+#     db_code.is_used = True
+#     db.commit()
+
+#     return {"message": "Código de verificação validado com sucesso!"}
