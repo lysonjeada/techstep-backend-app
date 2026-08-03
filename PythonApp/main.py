@@ -1,29 +1,45 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
-from sqlalchemy.orm import Session
-import models, schemas, database
-from services.interview_generator import extract_text_from_pdf, build_prompt
-from openai import OpenAI
-import os
-import traceback
-from worker.tasks import process_resume_feedback
-from datetime import datetime, timedelta
-from utils.serializers import serialize_list
+# app/main.py
+
 from dotenv import load_dotenv
-from jobs_service import job_router
+from fastapi import FastAPI
 
-from passlib.context import CryptContext
-from fastapi.security import OAuth2PasswordBearer 
-
+# Deve acontecer antes de importar módulos que usam variáveis de ambiente.
 load_dotenv()
 
-app = FastAPI()
+# Carrega os models no metadata do SQLAlchemy.
+from app import models as app_models
+from app.interview_simulation import (
+    models as interview_simulation_models,
+)
 
+from app.auth.router import router as auth_router
+from app.interviews.router import router as interviews_router
+from app.interview_simulation.router import (
+    router as interview_simulation_router,
+)
+from app.jobs_service.job_router import job_router
+from app.llm_generation.router import router as llm_router
+from app.study_plan.router import router as study_plan_router
+from app.dashboard.router import (
+    router as dashboard_router,
+)
+
+app = FastAPI(
+    title="Your Recruiting API",
+    description=(
+        "API for managing job applications, interviews, "
+        "and AI-powered tools."
+    ),
+    version="0.1.0",
+)
+
+app.include_router(auth_router)
+app.include_router(interviews_router)
+app.include_router(llm_router)
 app.include_router(job_router)
-
-task_results = {}
-
-# Cria as tabelas caso ainda não existam
-models.Base.metadata.create_all(bind=database.engine)
+app.include_router(study_plan_router)
+app.include_router(interview_simulation_router)
+app.include_router(dashboard_router)
 
 def get_db():
     db = database.SessionLocal()

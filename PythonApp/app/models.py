@@ -18,6 +18,7 @@ class Interview(Base):
     skills = Column(ARRAY(String), nullable=True) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    status = Column(String(30), nullable=False, default="applied", server_default="applied",)
 
 class User(Base):
     __tablename__ = "users"

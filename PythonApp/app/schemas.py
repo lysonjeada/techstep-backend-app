@@ -34,6 +34,7 @@ class InterviewBase(BaseModel):
     next_interview_date: Optional[datetime] = None
     notes: Optional[str] = None
     skills: List[str] = [""]
+    status: str = "applied"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,33 +136,3 @@ def format_title(value: str) -> str:
         SPECIAL_NAMES.get(word.lower(), word.capitalize())
         for word in words
     )
-
-
-class SimulationQuestionsRequest(BaseModel):
-    job_title: str
-    seniority: str
-    description: Optional[str] = None
-
-
-class SimulationAnswerRequest(BaseModel):
-    question: str
-    answer: str
-    response_time_seconds: int
-
-
-class SimulationEvaluationRequest(BaseModel):
-    job_title: str
-    seniority: str
-    answers: List[SimulationAnswerRequest]
-
-
-class SimulationEvaluationResponse(BaseModel):
-    clarity: int
-    objectivity: int
-    examples: int
-    technical_knowledge: int
-    response_time: int
-    overall: int
-    summary: str
-    strengths: List[str]
-    improvements: List[str]

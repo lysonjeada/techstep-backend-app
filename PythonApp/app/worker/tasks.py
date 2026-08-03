@@ -3,7 +3,6 @@
 # A importação para celery_app permanece como está, pois é necessária para o decorator @celery_app.task
 from .celery_app import celery_app 
 import traceback
-import fitz # Importação para PyMuPDF, se estiver usando para extração de PDF
 from openai import OpenAI
 import os
 # CORREÇÃO AQUI: Ajuste o caminho de importação para extract_text_from_pdf
