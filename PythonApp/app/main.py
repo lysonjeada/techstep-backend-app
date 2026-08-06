@@ -7,6 +7,7 @@ load_dotenv()
 from app import database
 import app.models
 import app.interview_simulation.models
+import app.auth.models
 
 from app.auth.router import router as auth_router
 from app.interviews.router import router as interviews_router

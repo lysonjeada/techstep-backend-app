@@ -4,57 +4,375 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app import schemas, models # Importa schemas e models do nível acima
-from .dependencies import get_db, verify_password, get_password_hash # Importa as dependências
+from .dependencies import get_db, verify_password, get_password_hash 
+
+from app.auth.security import (
+    hash_password,
+    verify_password,
+)
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    status,
+)
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.auth.email_service import (
+    send_verification_email,
+)
+from app.auth.schemas import (
+    AuthenticationRegisterRequest,
+    AuthenticationRegisterResponse,
+    ResendVerificationRequest,
+    ResendVerificationResponse,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
+)
+from app.auth.verification_service import (
+    create_resend_code,
+    create_verification_code,
+    validate_verification_code,
+)
+from app.database import get_db
+from app.models import User
+
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["Authentication"],
+)
 
 router = APIRouter(
     prefix="/users",
     tags=["Users and Authentication"]
 )
 
-@router.post("/register/", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
-def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    cleaned_email = user.email.strip()
-    cleaned_username = user.username.strip()
-    cleaned_password = user.password.strip()
-
-    if not cleaned_email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email não pode ser vazio.")
-    if not cleaned_username:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome de usuário não pode ser vazio.")
-    if not cleaned_password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Senha não pode ser vazia.")
-
-    db_user_email = db.query(models.User).filter(models.User.email == cleaned_email).first()
-    if db_user_email:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email já registrado")
-
-    db_user_username = db.query(models.User).filter(models.User.username == cleaned_username).first()
-    if db_user_username:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já existe")
-
-    hashed_password = get_password_hash(cleaned_password)
-    
-    db_user = models.User(
-        email=cleaned_email,
-        username=cleaned_username,
-        hashed_password=hashed_password
+@router.post(
+    "/register",
+    response_model=AuthenticationRegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_user(
+    request: AuthenticationRegisterRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    normalized_email = (
+        request.email
+        .strip()
+        .lower()
     )
-    
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    return db_user
 
-@router.post("/login/", response_model=schemas.UserOut)
-def login_user(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.username == user_credentials.username).first()
+    normalized_username = (
+        request.username
+        .strip()
+    )
+
+    existing_email_user = (
+        db.query(models.User)
+        .filter(
+            models.User.email
+            == normalized_email
+        )
+        .first()
+    )
+
+    existing_username_user = (
+        db.query(models.User)
+        .filter(
+            models.User.username
+            == normalized_username
+        )
+        .first()
+    )
+
+    # O e-mail já existe e já foi confirmado.
+    if (
+        existing_email_user is not None
+        and existing_email_user.is_email_verified
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este e-mail já está cadastrado.",
+        )
+
+    # O username pertence a outro cadastro.
+    if (
+        existing_username_user is not None
+        and (
+            existing_email_user is None
+            or existing_username_user.id
+            != existing_email_user.id
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este username já está em uso.",
+        )
+
+    # Existe um cadastro pendente para este e-mail.
+    if existing_email_user is not None:
+        user = existing_email_user
+
+        try:
+            code, retry_after = create_resend_code(
+                db=db,
+                user=user,
+            )
+
+            background_tasks.add_task(
+                send_verification_email,
+                user.email,
+                user.username,
+                code,
+            )
+
+            message = (
+                "Seu cadastro ainda está pendente. "
+                "Enviamos um novo código para o seu e-mail."
+            )
+
+        except HTTPException as error:
+            # Caso ainda esteja dentro do intervalo de reenvio,
+            # não bloqueamos a navegação para a confirmação.
+            if (
+                error.status_code
+                == status.HTTP_429_TOO_MANY_REQUESTS
+            ):
+                retry_after = int(
+                    error.headers.get(
+                        "Retry-After",
+                        "60",
+                    )
+                )
+
+                message = (
+                    "Seu cadastro ainda está pendente. "
+                    "Use o código enviado anteriormente "
+                    "ou aguarde para solicitar outro."
+                )
+            else:
+                raise
+
+        return AuthenticationRegisterResponse(
+            user_id=user.id,
+            email=user.email,
+            verification_required=True,
+            message=message,
+            retry_after_seconds=retry_after,
+        )
+
+    # Novo cadastro.
+    user = models.User(
+        username=normalized_username,
+        email=normalized_email,
+        hashed_password=hash_password(
+            request.password
+        ),
+        is_email_verified=False,
+    )
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    verification_code = create_verification_code(
+        db=db,
+        user=user,
+    )
+
+    background_tasks.add_task(
+        send_verification_email,
+        user.email,
+        user.username,
+        verification_code,
+    )
+
+    return AuthenticationRegisterResponse(
+        user_id=user.id,
+        email=user.email,
+        verification_required=True,
+        message=(
+            "Cadastro realizado. "
+            "Enviamos um código para o seu e-mail."
+        ),
+        retry_after_seconds=60,
+    )
+
+@router.post(
+    "/verify-email",
+    response_model=VerifyEmailResponse,
+)
+def verify_email(
+    request: VerifyEmailRequest,
+    db: Session = Depends(get_db),
+):
+    normalized_email = (
+        request.email
+        .strip()
+        .lower()
+    )
+
+    user = (
+        db.query(User)
+        .filter(
+            User.email
+            == normalized_email
+        )
+        .first()
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=
+                status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado.",
+        )
+
+    if user.is_email_verified:
+        return VerifyEmailResponse(
+            verified=True,
+            message=(
+                "Este e-mail já foi verificado."
+            ),
+        )
+
+    validate_verification_code(
+        db=db,
+        user=user,
+        code=request.code,
+    )
+
+    return VerifyEmailResponse(
+        verified=True,
+        message=(
+            "E-mail verificado com sucesso."
+        ),
+    )
+
+@router.post(
+    "/resend-verification",
+    response_model=
+        ResendVerificationResponse,
+)
+def resend_verification_code(
+    request: ResendVerificationRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    normalized_email = (
+        request.email
+        .strip()
+        .lower()
+    )
+
+    user = (
+        db.query(User)
+        .filter(
+            User.email
+            == normalized_email
+        )
+        .first()
+    )
+
+    # Resposta genérica também evita revelar
+    # quais e-mails existem no sistema.
+    if user is None:
+        return ResendVerificationResponse(
+            message=(
+                "Caso exista uma conta pendente, "
+                "um novo código será enviado."
+            ),
+            retry_after_seconds=60,
+        )
+
+    if user.is_email_verified:
+        return ResendVerificationResponse(
+            message=(
+                "Este e-mail já foi verificado."
+            ),
+            retry_after_seconds=60,
+        )
+
+    code, retry_after = (
+        create_resend_code(
+            db=db,
+            user=user,
+        )
+    )
+
+    background_tasks.add_task(
+        send_verification_email,
+        user.email,
+        user.username,
+        code,
+    )
+
+    return ResendVerificationResponse(
+        message=(
+            "Um novo código foi enviado."
+        ),
+        retry_after_seconds=retry_after,
+    )
+
+@router.post(
+    "/login/",
+    response_model=schemas.UserOut,
+)
+def login_user(
+    user_credentials: schemas.UserLogin,
+    db: Session = Depends(get_db),
+):
+    normalized_identifier = (
+        user_credentials.username
+        .strip()
+        .lower()
+    )
+
+    db_user = (
+        db.query(models.User)
+        .filter(
+            or_(
+                models.User.username
+                == user_credentials.username.strip(),
+                models.User.email
+                == normalized_identifier,
+            )
+        )
+        .first()
+    )
 
     if not db_user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário ou senha inválidos")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuário ou senha inválidos.",
+        )
 
-    if not verify_password(user_credentials.password, db_user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário ou senha inválidos")
+    if not verify_password(
+        user_credentials.password,
+        db_user.hashed_password,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuário ou senha inválidos.",
+        )
+
+    if not db_user.is_email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "email_not_verified",
+                "message": (
+                    "Confirme seu e-mail antes "
+                    "de fazer login."
+                ),
+                "email": db_user.email,
+            },
+        )
 
     return db_user
 
@@ -84,7 +402,7 @@ def update_user(user_id: str, updated_user: schemas.UserUpdate, db: Session = De
         db_user.username = updated_user.username
 
     if updated_user.password is not None:
-        db_user.hashed_password = get_password_hash(updated_user.password)
+        db_user.hashed_password = hash_password(updated_user.password)
 
     db.commit()
     db.refresh(db_user)
@@ -99,56 +417,3 @@ def delete_user(user_id: str, db: Session = Depends(get_db)):
     db.delete(db_user)
     db.commit()
     return
-
-# @router.post("/send_verification_code/", status_code=status.HTTP_200_OK)
-# def send_verification_code(email_request: schemas.EmailRequest, db: Session = Depends(get_db)):
-#     """
-#     Gera um código de verificação e o "envia" por e-mail.
-#     """
-#     # Verifica se o e-mail já existe na base de usuários
-#     user = db.query(models.User).filter(models.User.email == email_request.email).first()
-#     if not user:
-#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário com este e-mail não encontrado.")
-
-#     # Gera um novo código de verificação
-#     code = generate_verification_code()
-
-#     # Cria uma nova entrada no banco de dados para o código
-#     db_code = models.VerificationCode(email=email_request.email, code=code)
-#     db.add(db_code)
-#     db.commit()
-#     db.refresh(db_code)
-    
-#     # IMPORTANTE: Este é o ponto onde você integraria um serviço de e-mail real.
-#     # Exemplo: `send_email(email_request.email, "Seu código de verificação é: {code}")`
-    
-#     return {"message": "Código de verificação enviado com sucesso. Verifique seu e-mail."}
-
-# @router.post("/verify_code/", status_code=status.HTTP_200_OK)
-# def verify_code(code_verification: schemas.CodeVerification, db: Session = Depends(get_db)):
-#     """
-#     Valida o código de verificação recebido pelo usuário.
-#     """
-#     # Encontra o código de verificação mais recente para o e-mail fornecido
-#     db_code = db.query(models.VerificationCode).filter(
-#         models.VerificationCode.email == code_verification.email,
-#         models.VerificationCode.code == code_verification.code
-#     ).order_by(models.VerificationCode.created_at.desc()).first()
-
-#     if not db_code:
-#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código de verificação inválido.")
-
-#     # Define o tempo de validade do código (ex: 15 minutos)
-#     expiration_time = datetime.utcnow() - timedelta(minutes=15)
-    
-#     if db_code.created_at < expiration_time:
-#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código de verificação expirado.")
-    
-#     if db_code.is_used:
-#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código de verificação já utilizado.")
-
-#     # Marca o código como usado para evitar reutilização
-#     db_code.is_used = True
-#     db.commit()
-
-#     return {"message": "Código de verificação validado com sucesso!"}

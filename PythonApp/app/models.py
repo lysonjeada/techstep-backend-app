@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, Date, Text, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 import uuid
 from .database import Base
 
@@ -30,6 +31,8 @@ class User(Base):
     is_active = Column(Boolean, default=True) # Para desativar contas se necessário
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    is_email_verified = Column(Boolean, nullable=False, default=False, server_default="false")
+    verification_codes = relationship("EmailVerificationCode", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"

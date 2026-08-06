@@ -12,3 +12,6 @@ passlib[bcrypt]
 python-jose[cryptography]
 alembic
 fitz
+email-validator
+passlib[bcrypt]
+pwdlib[argon2]
