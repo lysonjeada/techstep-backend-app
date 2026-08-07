@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import (
@@ -7,6 +8,21 @@ from pydantic import (
     Field,
 )
 
+class AuthenticationLoginResponse(BaseModel):
+    id: UUID
+    email: EmailStr
+    username: str
+    is_active: bool
+    is_email_verified: bool
+    created_at: datetime
+    updated_at: datetime
+
+    access_token: str
+    token_type: str
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
 
 class AuthenticationRegisterRequest(BaseModel):
     username: str = Field(
@@ -21,12 +37,12 @@ class AuthenticationRegisterRequest(BaseModel):
         max_length=128,
     )
 
-
 class AuthenticationRegisterResponse(BaseModel):
     user_id: UUID
     email: EmailStr
     verification_required: bool
     message: str
+    retry_after_seconds: int = 60
 
 
 class VerifyEmailRequest(BaseModel):

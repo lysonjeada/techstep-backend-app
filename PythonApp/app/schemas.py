@@ -33,7 +33,9 @@ class InterviewBase(BaseModel):
     last_interview_date: Optional[datetime] = None
     next_interview_date: Optional[datetime] = None
     notes: Optional[str] = None
-    skills: List[str] = [""]
+    skills: List[str] = Field(
+        default_factory=list
+    )
     status: str = "applied"
 
     model_config = ConfigDict(from_attributes=True)
@@ -46,6 +48,8 @@ class InterviewUpdate(InterviewBase):
 
 class InterviewOut(BaseModel):
     id: UUID
+    user_id: UUID
+
     company_name: str
     job_title: str
     job_seniority: str
@@ -54,8 +58,14 @@ class InterviewOut(BaseModel):
     next_interview_date: Optional[date]
     notes: Optional[str]
     skills: Optional[List[str]] = None
+    status: str
+
     created_at: datetime
     updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
 
     @field_validator(
         "company_name",
@@ -106,15 +116,21 @@ class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, example="novo_devjunior")
     password: Optional[str] = Field(None, min_length=6, example="nova_senha_forte")
 
-class UserOut(UserBase):
-    id: uuid.UUID
+class AuthenticationLoginResponse(BaseModel):
+    id: UUID
+    email: EmailStr
+    username: str
     is_active: bool
+    is_email_verified: bool
     created_at: datetime
     updated_at: datetime
-    email: Optional[str]
-    username: Optional[str]
 
-    model_config = ConfigDict(from_attributes=True)
+    access_token: str
+    token_type: str
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )
 
 SPECIAL_NAMES = {
     "ios": "iOS",

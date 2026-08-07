@@ -56,39 +56,77 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-@app.post("/interviews/", response_model=schemas.InterviewOut)
-def create_interview(interview: schemas.InterviewCreate, db: Session = Depends(get_db)):
-    print("📥 Dados recebidos no corpo da requisição:")
-    print(interview.dict())
+@router.post(
+    "/",
+    response_model=schemas.InterviewOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_interview(
+    interview: schemas.InterviewCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        get_current_user
+    ),
+):
+    db_interview = models.Interview(
+        **interview.model_dump(),
+        user_id=current_user.id,
+    )
 
-    try:
-        db_interview = models.Interview(**interview.dict())
-        db.add(db_interview)
-        db.commit()
-        db.refresh(db_interview)
-        return db_interview
-    except Exception as e:
-        print("❌ Erro ao salvar entrevista:", str(e))
-        raise HTTPException(status_code=500, detail="Erro ao salvar entrevista")
+    db.add(db_interview)
+    db.commit()
+    db.refresh(db_interview)
+
+    return db_interview
 
 @app.get("/interviews/{interview_id}", response_model=schemas.InterviewOut)
 def read_interview(interview_id: str, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
+    interview = (
+    db.query(models.Interview)
+    .filter(
+        models.Interview.id == interview_id,
+        models.Interview.user_id
+        == current_user.id,
+    )
+    .first()
+    )
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
     return interview
 
-@app.get("/interviews/", response_model=list[schemas.InterviewOut])
-def list_interviews(db: Session = Depends(get_db)):
-    interviews = db.query(models.Interview)\
-        .order_by(models.Interview.created_at.desc())\
+@router.get(
+    "/",
+    response_model=list[schemas.InterviewOut],
+)
+def list_interviews(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        get_current_user
+    ),
+):
+    return (
+        db.query(models.Interview)
+        .filter(
+            models.Interview.user_id
+            == current_user.id
+        )
+        .order_by(
+            models.Interview.created_at.desc()
+        )
         .all()
-    
-    return serialize_list(interviews, schemas.InterviewOut)
+    )
 
 @app.put("/interviews/{interview_id}", response_model=schemas.InterviewOut)
 def update_interview(interview_id: str, updated: schemas.InterviewUpdate, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
+    interview = (
+    db.query(models.Interview)
+    .filter(
+        models.Interview.id == interview_id,
+        models.Interview.user_id
+        == current_user.id,
+    )
+    .first()
+    )     
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
     for key, value in updated.dict(exclude_unset=True).items():
@@ -99,7 +137,15 @@ def update_interview(interview_id: str, updated: schemas.InterviewUpdate, db: Se
 
 @app.delete("/interviews/{interview_id}")
 def delete_interview(interview_id: str, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
+    interview = (
+    db.query(models.Interview)
+    .filter(
+        models.Interview.id == interview_id,
+        models.Interview.user_id
+        == current_user.id,
+    )
+    .first()
+    )
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
     db.delete(interview)
@@ -213,71 +259,39 @@ def get_result(task_id: str):
     else:
         return {"detail": "Ainda processando..."}, 202
 
-@app.get("/interviews/next/", response_model=list[schemas.InterviewOut])
-def get_upcoming_interviews(db: Session = Depends(get_db)):
-    now = datetime.utcnow()
-    soon = now + timedelta(days=120)
+@router.get(
+    "/next/",
+    response_model=list[schemas.InterviewOut],
+)
+def get_upcoming_interviews(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        get_current_user
+    ),
+):
+    today = date.today()
+    limit_date = today + timedelta(days=120)
 
-    interviews = db.query(models.Interview)\
+    return (
+        db.query(models.Interview)
         .filter(
-            models.Interview.next_interview_date != None,
-            models.Interview.next_interview_date >= now,
-            models.Interview.next_interview_date <= soon
-        )\
-        .order_by(models.Interview.next_interview_date.asc())\
+            models.Interview.user_id
+            == current_user.id,
+            models.Interview.next_interview_date
+            .isnot(None),
+            models.Interview.next_interview_date
+            >= today,
+            models.Interview.next_interview_date
+            <= limit_date,
+        )
+        .order_by(
+            models.Interview.next_interview_date
+            .asc()
+        )
         .all()
-
-    return serialize_list(interviews, schemas.InterviewOut)
-
-@app.post("/users/register/", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
-def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    """
-    Endpoint para registrar um novo usuário.
-    Requer email, username e senha.
-    A senha é hashed antes de ser armazenada.
-    """
-    # --- SANITIZAÇÃO DOS DADOS: REMOVENDO ESPAÇOS EM BRANCO ---
-    # Aplica .strip() para remover espaços em branco no início e no fim
-    cleaned_email = user.email.strip()
-    cleaned_username = user.username.strip()
-    cleaned_password = user.password.strip() # Importante limpar antes de hashear!
-
-    # Opcional: Você pode adicionar validação para garantir que os campos não fiquem vazios
-    # APÓS o strip, se eles forem obrigatórios e não puderem ser apenas espaços.
-    if not cleaned_email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email não pode ser vazio.")
-    if not cleaned_username:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome de usuário não pode ser vazio.")
-    if not cleaned_password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Senha não pode ser vazia.")
-
-    # Verifica se o email já existe usando o email limpo
-    db_user_email = db.query(models.User).filter(models.User.email == cleaned_email).first()
-    if db_user_email:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email já registrado")
-
-    # Verifica se o username já existe usando o username limpo
-    db_user_username = db.query(models.User).filter(models.User.username == cleaned_username).first()
-    if db_user_username:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já existe")
-
-    # Hasheia a senha limpa
-    hashed_password = get_password_hash(cleaned_password)
-    
-    # Cria o novo usuário com os dados limpos
-    db_user = models.User(
-        email=cleaned_email,
-        username=cleaned_username,
-        hashed_password=hashed_password
     )
-    
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    return db_user
 
-@app.post("/users/login/", response_model=schemas.UserOut) # Ou um token de acesso para sistemas mais complexos
+@app.post("/users/login/", response_model=schemas.AuthenticationLoginResponse) # Ou um token de acesso para sistemas mais complexos
 def login_user(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
     """
     Endpoint para login de usuário.
@@ -296,7 +310,7 @@ def login_user(user_credentials: schemas.UserLogin, db: Session = Depends(get_db
     # Em um sistema real, aqui você geraria e retornaria um token JWT
     return db_user
 
-@app.get("/users/{user_id}", response_model=schemas.UserOut)
+@app.get("/users/{user_id}", response_model=schemas.AuthenticationLoginResponse)
 def get_user(user_id: str, db: Session = Depends(get_db)):
     """
     Endpoint para buscar um usuário pelo ID.
@@ -306,7 +320,7 @@ def get_user(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
     return db_user
 
-@app.put("/users/{user_id}", response_model=schemas.UserOut)
+@app.put("/users/{user_id}", response_model=schemas.AuthenticationLoginResponse)
 def update_user(user_id: str, updated_user: schemas.UserUpdate, db: Session = Depends(get_db)):
     """
     Endpoint para atualizar as informações de um usuário.

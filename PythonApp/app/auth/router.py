@@ -2,9 +2,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from fastapi import Response
 
-from app import schemas, models # Importa schemas e models do nível acima
-from .dependencies import get_db, verify_password, get_password_hash 
+from app import models # Importa schemas e models do nível acima
+from .dependencies import verify_password, get_password_hash 
+
+from app import schemas as app_schemas
+from . import schemas as auth_schemas
 
 from app.auth.security import (
     hash_password,
@@ -17,6 +21,7 @@ from fastapi import (
     Depends,
     HTTPException,
     status,
+    Body,
 )
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -25,8 +30,6 @@ from app.auth.email_service import (
     send_verification_email,
 )
 from app.auth.schemas import (
-    AuthenticationRegisterRequest,
-    AuthenticationRegisterResponse,
     ResendVerificationRequest,
     ResendVerificationResponse,
     VerifyEmailRequest,
@@ -40,6 +43,12 @@ from app.auth.verification_service import (
 from app.database import get_db
 from app.models import User
 
+from app.schemas import (
+    AuthenticationLoginResponse,
+)
+from app.auth.token_service import (
+    create_access_token,
+)
 
 router = APIRouter(
     prefix="/auth",
@@ -53,11 +62,11 @@ router = APIRouter(
 
 @router.post(
     "/register",
-    response_model=AuthenticationRegisterResponse,
+    response_model=auth_schemas.AuthenticationRegisterResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def register_user(
-    request: AuthenticationRegisterRequest,
+    request: auth_schemas.AuthenticationRegisterRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -158,7 +167,7 @@ def register_user(
             else:
                 raise
 
-        return AuthenticationRegisterResponse(
+        return auth_schemas.AuthenticationRegisterResponse(
             user_id=user.id,
             email=user.email,
             verification_required=True,
@@ -192,7 +201,7 @@ def register_user(
         verification_code,
     )
 
-    return AuthenticationRegisterResponse(
+    return auth_schemas.AuthenticationRegisterResponse(
         user_id=user.id,
         email=user.email,
         verification_required=True,
@@ -321,10 +330,10 @@ def resend_verification_code(
 
 @router.post(
     "/login/",
-    response_model=schemas.UserOut,
+    response_model=auth_schemas.AuthenticationLoginResponse,
 )
 def login_user(
-    user_credentials: schemas.UserLogin,
+    user_credentials: app_schemas.UserLogin = Body(...),
     db: Session = Depends(get_db),
 ):
     normalized_identifier = (
@@ -346,7 +355,7 @@ def login_user(
         .first()
     )
 
-    if not db_user:
+    if db_user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos.",
@@ -374,16 +383,32 @@ def login_user(
             },
         )
 
-    return db_user
+    access_token = create_access_token(
+        db_user.id
+    )
 
-@router.get("/{user_id}", response_model=schemas.UserOut)
+    return auth_schemas.AuthenticationLoginResponse(
+        id=db_user.id,
+        email=db_user.email,
+        username=db_user.username,
+        is_active=db_user.is_active,
+        is_email_verified=(
+            db_user.is_email_verified
+        ),
+        created_at=db_user.created_at,
+        updated_at=db_user.updated_at,
+        access_token=access_token,
+        token_type="bearer",
+    )
+
+@router.get("/{user_id}", response_model=app_schemas.AuthenticationLoginResponse)
 def get_user(user_id: str, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
     return db_user
 
-@router.put("/{user_id}", response_model=schemas.UserOut)
+@router.put("/{user_id}", response_model=app_schemas.AuthenticationLoginResponse)
 def update_user(user_id: str, updated_user: schemas.UserUpdate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
@@ -417,3 +442,52 @@ def delete_user(user_id: str, db: Session = Depends(get_db)):
     db.delete(db_user)
     db.commit()
     return
+
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+) -> Response:
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == user_id)
+        .first()
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado.",
+        )
+
+    try:
+        db.delete(user)
+        db.commit()
+
+    except IntegrityError as error:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Não foi possível excluir o usuário "
+                "porque ainda existem dados vinculados "
+                "a essa conta."
+            ),
+        ) from error
+
+    except Exception as error:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível excluir o usuário.",
+        ) from error
+
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT
+    )

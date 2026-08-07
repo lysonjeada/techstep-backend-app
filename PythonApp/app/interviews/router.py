@@ -4,8 +4,13 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import List
 
+from app.database import get_db
+
 from .. import schemas, models # Importa schemas e models do nível acima
-from ..auth.dependencies import get_db # Importa get_db do diretório auth
+
+from app.auth.dependencies import (
+    get_current_user,
+)
 
 router = APIRouter(
     prefix="/interviews",
@@ -44,13 +49,27 @@ def read_interview(interview_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Interview not found")
     return interview
 
-@router.get("/", response_model=List[schemas.InterviewOut])
-def list_interviews(db: Session = Depends(get_db)):
-    interviews = db.query(models.Interview)\
-        .order_by(models.Interview.created_at.desc())\
+@router.get(
+    "/",
+    response_model=list[schemas.InterviewOut],
+)
+def list_interviews(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(
+        get_current_user
+    ),
+):
+    return (
+        db.query(models.Interview)
+        .filter(
+            models.Interview.user_id
+            == current_user.id
+        )
+        .order_by(
+            models.Interview.created_at.desc()
+        )
         .all()
-    # Não precisa de serialize_list se schemas.InterviewOut tem from_attributes=True
-    return interviews
+    )
 
 @router.put("/{interview_id}", response_model=schemas.InterviewOut)
 def update_interview(interview_id: str, updated: schemas.InterviewUpdate, db: Session = Depends(get_db)):
