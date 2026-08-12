@@ -270,9 +270,53 @@ def get_upcoming_interviews(
     ),
 ):
     today = date.today()
-    limit_date = today + timedelta(days=120)
 
-    return (
+    print(
+        "📅 GET /interviews/next/",
+        flush=True,
+    )
+
+    print(
+        "📅 Hoje:",
+        today,
+        flush=True,
+    )
+
+    print(
+        "👤 Usuário:",
+        current_user.id,
+        flush=True,
+    )
+
+    # Apenas para debug:
+    # mostra todas as entrevistas desse usuário.
+    user_interviews = (
+        db.query(models.Interview)
+        .filter(
+            models.Interview.user_id
+            == current_user.id
+        )
+        .all()
+    )
+
+    print(
+        "📦 Entrevistas totais do usuário:",
+        len(user_interviews),
+        flush=True,
+    )
+
+    for interview in user_interviews:
+        print(
+            (
+                "🔎 "
+                f"{interview.company_name} | "
+                f"next_interview_date="
+                f"{interview.next_interview_date}"
+            ),
+            flush=True,
+        )
+
+    upcoming_interviews = (
         db.query(models.Interview)
         .filter(
             models.Interview.user_id
@@ -281,8 +325,6 @@ def get_upcoming_interviews(
             .isnot(None),
             models.Interview.next_interview_date
             >= today,
-            models.Interview.next_interview_date
-            <= limit_date,
         )
         .order_by(
             models.Interview.next_interview_date
@@ -290,6 +332,24 @@ def get_upcoming_interviews(
         )
         .all()
     )
+
+    print(
+        "✅ Próximas entrevistas encontradas:",
+        len(upcoming_interviews),
+        flush=True,
+    )
+
+    for interview in upcoming_interviews:
+        print(
+            (
+                "📌 PRÓXIMA: "
+                f"{interview.company_name} | "
+                f"{interview.next_interview_date}"
+            ),
+            flush=True,
+        )
+
+    return upcoming_interviews
 
 @app.post("/users/login/", response_model=schemas.AuthenticationLoginResponse) # Ou um token de acesso para sistemas mais complexos
 def login_user(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):

@@ -336,10 +336,20 @@ def login_user(
     user_credentials: app_schemas.UserLogin = Body(...),
     db: Session = Depends(get_db),
 ):
+    print(
+        "🟢 ENTROU NO ENDPOINT DE LOGIN",
+        flush=True,
+    )
+
     normalized_identifier = (
         user_credentials.username
         .strip()
         .lower()
+    )
+
+    print(
+        "🔎 Antes de consultar usuário",
+        flush=True,
     )
 
     db_user = (
@@ -355,16 +365,38 @@ def login_user(
         .first()
     )
 
+    print(
+        "✅ Consulta do usuário terminou",
+        flush=True,
+    )
+
     if db_user is None:
+        print(
+            "❌ Usuário não encontrado",
+            flush=True,
+        )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos.",
         )
 
-    if not verify_password(
+    print(
+        "🔐 Antes de verificar senha",
+        flush=True,
+    )
+
+    password_is_valid = verify_password(
         user_credentials.password,
         db_user.hashed_password,
-    ):
+    )
+
+    print(
+        "✅ Verificação de senha terminou",
+        flush=True,
+    )
+
+    if not password_is_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuário ou senha inválidos.",
@@ -375,40 +407,57 @@ def login_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "email_not_verified",
-                "message": (
-                    "Confirme seu e-mail antes "
-                    "de fazer login."
-                ),
+                "message": """
+                Confirme seu e-mail antes de fazer login.
+                """,
                 "email": db_user.email,
             },
         )
+
+    print(
+        "🎟️ Antes de criar token",
+        flush=True,
+    )
 
     access_token = create_access_token(
         db_user.id
     )
 
-    return auth_schemas.AuthenticationLoginResponse(
-        id=db_user.id,
-        email=db_user.email,
-        username=db_user.username,
-        is_active=db_user.is_active,
-        is_email_verified=(
-            db_user.is_email_verified
-        ),
-        created_at=db_user.created_at,
-        updated_at=db_user.updated_at,
-        access_token=access_token,
-        token_type="bearer",
+    print(
+        "✅ Token criado",
+        flush=True,
     )
 
-@router.get("/{user_id}", response_model=app_schemas.AuthenticationLoginResponse)
+    response = (
+        auth_schemas.AuthenticationLoginResponse(
+            id=db_user.id,
+            email=db_user.email,
+            username=db_user.username,
+            is_active=db_user.is_active,
+            is_email_verified=
+                db_user.is_email_verified,
+            created_at=db_user.created_at,
+            updated_at=db_user.updated_at,
+            access_token=access_token,
+            token_type="bearer",
+        )
+    )
+
+    print(
+        "🏁 LOGIN FINALIZADO",
+        flush=True,
+    )
+
+    return response
+
+@router.get("/{user_id}", response_model=auth_schemas.AuthenticationUserResponse)
 def get_user(user_id: str, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
     return db_user
 
-@router.put("/{user_id}", response_model=app_schemas.AuthenticationLoginResponse)
+@router.put("/{user_id}", response_model=auth_schemas.AuthenticationUserResponse)
 def update_user(user_id: str, updated_user: schemas.UserUpdate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
