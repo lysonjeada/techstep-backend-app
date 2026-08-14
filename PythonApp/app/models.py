@@ -151,3 +151,25 @@ class User(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+    tutor_profile = relationship(
+        "TutorProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    refresh_tokens = relationship(
+        "RefreshToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    videos = relationship(
+    "Video",
+    back_populates="user",
+    cascade="all, delete-orphan",
+    passive_deletes=True,
+    )

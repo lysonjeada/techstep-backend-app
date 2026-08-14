@@ -10,6 +10,11 @@ from .dependencies import verify_password, get_password_hash
 from app import schemas as app_schemas
 from . import schemas as auth_schemas
 
+from app.auth.refresh_token_service import (
+    create_refresh_token,
+    rotate_refresh_token,
+)
+
 from app.auth.security import (
     hash_password,
     verify_password,
@@ -48,6 +53,7 @@ from app.schemas import (
 )
 from app.auth.token_service import (
     create_access_token,
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
 router = APIRouter(
@@ -423,28 +429,57 @@ def login_user(
         db_user.id
     )
 
+    refresh_token = create_refresh_token(
+        db=db,
+        user_id=db_user.id,
+    )
+
+    db.commit()
+
     print(
         "✅ Token criado",
         flush=True,
     )
 
     response = (
-        auth_schemas.AuthenticationLoginResponse(
-            id=db_user.id,
-            email=db_user.email,
-            username=db_user.username,
-            is_active=db_user.is_active,
-            is_email_verified=
-                db_user.is_email_verified,
-            created_at=db_user.created_at,
-            updated_at=db_user.updated_at,
-            access_token=access_token,
-            token_type="bearer",
+        auth_schemas
+    .AuthenticationLoginResponse(
+        id=db_user.id,
+        email=db_user.email,
+        username=db_user.username,
+        is_active=db_user.is_active,
+        is_email_verified=
+            db_user.is_email_verified,
+        created_at=
+            db_user.created_at,
+        updated_at=
+            db_user.updated_at,
+        access_token=
+            access_token,
+        refresh_token=
+            refresh_token,
+        token_type=
+            "bearer",
+        expires_in=
+            JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+            * 60,
         )
     )
 
     print(
         "🏁 LOGIN FINALIZADO",
+        flush=True,
+    )
+
+    print(
+        "🔑 Refresh token criado:",
+        bool(refresh_token),
+        flush=True,
+    )
+
+    print(
+        "📦 RESPONSE LOGIN:",
+        response.model_dump(),
         flush=True,
     )
 
@@ -539,4 +574,66 @@ def delete_user(
 
     return Response(
         status_code=status.HTTP_204_NO_CONTENT
+    )
+
+@router.post(
+    "/refresh",
+    response_model=
+        auth_schemas.TokenRefreshResponse,
+)
+def refresh_access_token(
+    payload:
+        auth_schemas.RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+    user_id, new_refresh_token = (
+        rotate_refresh_token(
+            db=db,
+            raw_token=
+                payload.refresh_token,
+        )
+    )
+
+    user = (
+        db.query(models.User)
+        .filter(
+            models.User.id == user_id
+        )
+        .first()
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=
+                status.HTTP_401_UNAUTHORIZED,
+            detail=
+                "Usuário não encontrado.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=
+                status.HTTP_403_FORBIDDEN,
+            detail=
+                "Usuário desativado.",
+        )
+
+    access_token = create_access_token(
+        user.id
+    )
+
+    return (
+        auth_schemas
+        .TokenRefreshResponse(
+            access_token=
+                access_token,
+            refresh_token=
+                new_refresh_token,
+            token_type=
+                "bearer",
+            expires_in=(
+                JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+                * 60
+            ),
+        )
     )

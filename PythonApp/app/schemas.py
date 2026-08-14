@@ -116,17 +116,25 @@ class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, example="novo_devjunior")
     password: Optional[str] = Field(None, min_length=6, example="nova_senha_forte")
 
-class AuthenticationLoginResponse(BaseModel):
+class AuthenticationLoginResponse(
+    BaseModel
+):
     id: UUID
     email: EmailStr
     username: str
+
     is_active: bool
     is_email_verified: bool
+
     created_at: datetime
     updated_at: datetime
 
     access_token: str
+    refresh_token: str
+
     token_type: str
+
+    expires_in: int
 
     model_config = ConfigDict(
         from_attributes=True

@@ -8,7 +8,9 @@ from pydantic import (
     Field,
 )
 
-class AuthenticationLoginResponse(BaseModel):
+class AuthenticationLoginResponse(
+    BaseModel
+):
     id: UUID
     email: EmailStr
     username: str
@@ -16,12 +18,13 @@ class AuthenticationLoginResponse(BaseModel):
     is_email_verified: bool
     created_at: datetime
     updated_at: datetime
-
     access_token: str
+    refresh_token: str
     token_type: str
+    expires_in: int
 
     model_config = ConfigDict(
-        from_attributes=True
+        from_attributes=True,
     )
 
 class AuthenticationRegisterRequest(BaseModel):
@@ -29,7 +32,7 @@ class AuthenticationRegisterRequest(BaseModel):
         min_length=3,
         max_length=50,
     )
-
+    
     email: EmailStr
 
     password: str = Field(
@@ -59,7 +62,6 @@ class VerifyEmailResponse(BaseModel):
     verified: bool
     message: str
 
-
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
@@ -67,7 +69,6 @@ class ResendVerificationRequest(BaseModel):
 class ResendVerificationResponse(BaseModel):
     message: str
     retry_after_seconds: int = 60
-
 
 class UserResponse(BaseModel):
     id: UUID
@@ -91,3 +92,17 @@ class AuthenticationUserResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
     )
+
+class RefreshTokenRequest(
+    BaseModel
+):
+    refresh_token: str
+
+
+class TokenRefreshResponse(
+    BaseModel
+):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int

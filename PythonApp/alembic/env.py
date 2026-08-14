@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 import app.auth.models
+import app.tutors.models
+import app.videos.models
 
 # Caminho absoluto da pasta PythonApp.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

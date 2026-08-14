@@ -20,6 +20,14 @@ from app.interview_simulation.router import (
 from app.dashboard.router import (
     router as dashboard_router,
 )
+from app.tutors.router import (
+    router as tutors_router,
+)
+from app.videos.router import (
+    router as videos_router,
+)
+
+
 
 app = FastAPI(
     title="Your Recruiting API",
@@ -37,6 +45,8 @@ app.include_router(job_router)
 app.include_router(study_plan_router)
 app.include_router(interview_simulation_router)
 app.include_router(dashboard_router)
+app.include_router(tutors_router)
+app.include_router(videos_router)
 
 # Todos os models importados acima serão registrados neste metadata.
 database.Base.metadata.create_all(
