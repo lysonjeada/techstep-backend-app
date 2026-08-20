@@ -11,7 +11,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:D%40823%21@localhost:15432/techstep",
+    "DATABASE_URL=postgresql://postgres:D%40823%21@db.cgksradaxmvpylbxiizq.supabase.co:5432/postgres",
 )
 
 
