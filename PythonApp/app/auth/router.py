@@ -10,6 +10,8 @@ from .dependencies import verify_password, get_password_hash
 from app import schemas as app_schemas
 from . import schemas as auth_schemas
 
+from uuid import UUID
+
 from app.auth.refresh_token_service import (
     create_refresh_token,
     rotate_refresh_token,
