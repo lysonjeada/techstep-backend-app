@@ -47,6 +47,10 @@ from .email_service import (
     send_video_review_email,
 )
 
+from app.observability import (
+    logger,
+)
+
 
 router = APIRouter(
     prefix="/videos",

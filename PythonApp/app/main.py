@@ -9,6 +9,11 @@ import app.models
 import app.interview_simulation.models
 import app.auth.models
 
+import time
+import uuid
+
+from fastapi import Request
+
 from app.auth.router import router as auth_router
 from app.interviews.router import router as interviews_router
 from app.llm_generation.router import router as llm_router
@@ -27,7 +32,9 @@ from app.videos.router import (
     router as videos_router,
 )
 
-
+from app.observability import (
+    logger,
+)
 
 app = FastAPI(
     title="Your Recruiting API",
@@ -37,6 +44,90 @@ app = FastAPI(
     ),
     version="0.1.0",
 )
+
+@app.middleware("http")
+async def observability_middleware(
+    request: Request,
+    call_next,
+):
+    request_id = (
+        request.headers.get(
+            "X-Railway-Request-Id"
+        )
+        or str(uuid.uuid4())
+    )
+
+    started_at = (
+        time.perf_counter()
+    )
+
+    try:
+        response = await call_next(
+            request
+        )
+
+        duration_ms = round(
+            (
+                time.perf_counter()
+                - started_at
+            )
+            * 1000,
+            2,
+        )
+
+        logger.info(
+            "request completed",
+            extra={
+                "requestId":
+                    request_id,
+                "method":
+                    request.method,
+                "path":
+                    request.url.path,
+                "statusCode":
+                    response.status_code,
+                "durationMs":
+                    duration_ms,
+                "event":
+                    "http_request",
+            },
+        )
+
+        response.headers[
+            "X-Request-ID"
+        ] = request_id
+
+        return response
+
+    except Exception:
+        duration_ms = round(
+            (
+                time.perf_counter()
+                - started_at
+            )
+            * 1000,
+            2,
+        )
+
+        logger.exception(
+            "request failed",
+            extra={
+                "requestId":
+                    request_id,
+                "method":
+                    request.method,
+                "path":
+                    request.url.path,
+                "statusCode":
+                    500,
+                "durationMs":
+                    duration_ms,
+                "event":
+                    "http_request_failed",
+            },
+        )
+
+        raise
 
 app.include_router(auth_router)
 app.include_router(interviews_router)
