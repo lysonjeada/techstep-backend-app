@@ -106,3 +106,16 @@ class TokenRefreshResponse(
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class UserPasswordUpdate(BaseModel):
+    current_password: str
+
+    new_password: str = Field(
+        min_length=8,
+        max_length=128,
+    )
+
+
+class PasswordUpdateResponse(BaseModel):
+    message: str

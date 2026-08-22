@@ -5,15 +5,18 @@ from typing import List
 from fastapi import Response
 
 from app import models # Importa schemas e models do nível acima
-from .dependencies import verify_password, get_password_hash 
+from .dependencies import verify_password, get_password_hash, get_current_user
 
 from app import schemas as app_schemas
 from . import schemas as auth_schemas
 
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from app.auth.refresh_token_service import (
     create_refresh_token,
+    revoke_all_refresh_tokens_for_user,
     rotate_refresh_token,
 )
 
@@ -487,18 +490,19 @@ def login_user(
 
     return response
 
-@router.get("/{user_id}", response_model=auth_schemas.AuthenticationUserResponse)
-def get_user(user_id: str, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
-    return db_user
-
-@router.put("/{user_id}", response_model=auth_schemas.AuthenticationUserResponse)
-def update_user(user_id: str, updated_user: app_schemas.UserUpdate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
+def _apply_profile_update(
+    db: Session,
+    db_user: models.User,
+    updated_user: app_schemas.UserUpdate,
+) -> models.User:
+    if updated_user.password is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Para alterar a senha, use "
+                "PUT /users/me/password."
+            ),
+        )
 
     if updated_user.email is not None and updated_user.email != db_user.email:
         existing_email_user = db.query(models.User).filter(models.User.email == updated_user.email).first()
@@ -512,44 +516,15 @@ def update_user(user_id: str, updated_user: app_schemas.UserUpdate, db: Session 
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Novo nome de usuário já está em uso")
         db_user.username = updated_user.username
 
-    if updated_user.password is not None:
-        db_user.hashed_password = hash_password(updated_user.password)
-
     db.commit()
     db.refresh(db_user)
     return db_user
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(user_id: str, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
-    
-    db.delete(db_user)
-    db.commit()
-    return
 
-@router.delete(
-    "/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    response_class=Response,
-)
-def delete_user(
-    user_id: UUID,
-    db: Session = Depends(get_db),
+def _delete_user(
+    db: Session,
+    user: models.User,
 ) -> Response:
-    user = (
-        db.query(models.User)
-        .filter(models.User.id == user_id)
-        .first()
-    )
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuário não encontrado.",
-        )
-
     try:
         db.delete(user)
         db.commit()
@@ -577,6 +552,113 @@ def delete_user(
     return Response(
         status_code=status.HTTP_204_NO_CONTENT
     )
+
+
+@router.get(
+    "/me",
+    response_model=auth_schemas.AuthenticationUserResponse,
+)
+def get_current_user_profile(
+    current_user: models.User = Depends(get_current_user),
+):
+    return current_user
+
+
+@router.put(
+    "/me",
+    response_model=auth_schemas.AuthenticationUserResponse,
+)
+def update_current_user_profile(
+    updated_user: app_schemas.UserUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _apply_profile_update(
+        db,
+        current_user,
+        updated_user,
+    )
+
+
+@router.put(
+    "/me/password",
+    response_model=auth_schemas.PasswordUpdateResponse,
+)
+def update_current_user_password(
+    payload: auth_schemas.UserPasswordUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(
+        payload.current_password,
+        current_user.hashed_password,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Senha atual incorreta.",
+        )
+
+    current_user.hashed_password = hash_password(
+        payload.new_password
+    )
+
+    revoke_all_refresh_tokens_for_user(
+        db,
+        current_user.id,
+    )
+
+    db.commit()
+
+    return auth_schemas.PasswordUpdateResponse(
+        message="Senha atualizada com sucesso."
+    )
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_current_user(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    return _delete_user(db, current_user)
+
+
+@router.get("/{user_id}", response_model=auth_schemas.AuthenticationUserResponse)
+def get_user(
+    user_id: UUID,
+    current_user: models.User = Depends(get_current_user),
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    return current_user
+
+@router.put("/{user_id}", response_model=auth_schemas.AuthenticationUserResponse)
+def update_user(
+    user_id: UUID,
+    updated_user: app_schemas.UserUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    return _apply_profile_update(db, current_user, updated_user)
+
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_user(
+    user_id: UUID,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    if current_user.id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    return _delete_user(db, current_user)
 
 @router.post(
     "/refresh",

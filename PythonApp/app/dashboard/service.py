@@ -1,6 +1,7 @@
 from collections import Counter
 from datetime import date
 from typing import Any, Dict, List, Tuple
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -32,9 +33,14 @@ OFFER_STATUSES = {
 
 def build_progress_dashboard(
     db: Session,
+    user_id: UUID,
     months: int = 6,
 ) -> Dict[str, Any]:
-    applications = db.query(Interview).all()
+    applications = (
+        db.query(Interview)
+        .filter(Interview.user_id == user_id)
+        .all()
+    )
     today = date.today()
 
     total_applications = len(applications)
