@@ -98,6 +98,14 @@ class Video(Base):
         nullable=True,
     )
 
+    # Quando o e-mail de "vídeo aguardando revisão" foi enviado pela
+    # última vez (no upload, ou num reenvio manual) — usado para
+    # limitar o botão de reenvio a 1x por dia por vídeo.
+    review_notification_sent_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     user = relationship(
         "User",
         back_populates="videos",

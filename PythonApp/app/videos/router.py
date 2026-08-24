@@ -117,6 +117,22 @@ def hash_review_token(
     ).hexdigest()
 
 
+def next_resend_allowed_at(
+    video: models.Video,
+) -> datetime | None:
+    if (
+        video.status != "pending"
+        or video.review_notification_sent_at
+        is None
+    ):
+        return None
+
+    return (
+        video.review_notification_sent_at
+        + timedelta(days=1)
+    )
+
+
 def serialize_video(
     video: models.Video,
 ) -> schemas.VideoOut:
@@ -138,6 +154,8 @@ def serialize_video(
         created_at=video.created_at,
         reviewed_at=video.reviewed_at,
         stream_path=stream_path,
+        next_resend_allowed_at=
+            next_resend_allowed_at(video),
     )
 
 
@@ -347,6 +365,12 @@ async def upload_video(
                 timezone.utc
             )
             + timedelta(days=7)
+        ),
+
+        review_notification_sent_at=(
+            datetime.now(
+                timezone.utc
+            )
         ),
     )
 
@@ -600,6 +624,166 @@ def delete_video(
             "userId":
                 str(current_user.id),
         },
+    )
+
+
+# MARK: Resend review notification
+
+
+@router.post(
+    "/{video_id}/resend-review",
+    response_model=
+        schemas.ResendReviewResponse,
+)
+def resend_review_notification(
+    video_id: UUID,
+
+    background_tasks: BackgroundTasks,
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    video = (
+        db.query(models.Video)
+        .filter(
+            models.Video.id
+            == video_id
+        )
+        .first()
+    )
+
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=
+                "Vídeo não encontrado.",
+        )
+
+    if (
+        video.user_id
+        != current_user.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=
+                "Você não pode reenviar a notificação deste vídeo.",
+        )
+
+    if video.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code":
+                    "VIDEO_NOT_PENDING",
+                "message": (
+                    "Só é possível reenviar a notificação "
+                    "enquanto o vídeo está em análise."
+                ),
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+
+    if video.review_notification_sent_at is not None:
+        allowed_at = (
+            video.review_notification_sent_at
+            + timedelta(days=1)
+        )
+
+        if now < allowed_at:
+            logger.info(
+                "video review notification resend rejected: too soon",
+                extra={
+                    "event":
+                        "video_review_resend_rejected",
+                    "videoId":
+                        str(video_id),
+                    "userId":
+                        str(current_user.id),
+                },
+            )
+
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code":
+                        "RESEND_TOO_SOON",
+                    "message": (
+                        "Você já reenviou a notificação "
+                        "hoje. Tente novamente amanhã."
+                    ),
+                    "next_allowed_at":
+                        allowed_at.isoformat(),
+                },
+                headers={
+                    "Retry-After": str(
+                        int(
+                            (
+                                allowed_at
+                                - now
+                            )
+                            .total_seconds()
+                        )
+                    )
+                },
+            )
+
+    # O token de revisão anterior é substituído — o link antigo (se
+    # ainda não expirado) deixa de funcionar, igual ao que já
+    # acontece em approve_video/reject_video após uma decisão.
+    review_token = (
+        secrets.token_urlsafe(32)
+    )
+
+    video.review_token_hash = (
+        hash_review_token(
+            review_token
+        )
+    )
+
+    video.review_token_expires_at = (
+        now + timedelta(days=7)
+    )
+
+    video.review_notification_sent_at = now
+
+    db.commit()
+    db.refresh(video)
+
+    review_url = (
+        f"{PUBLIC_API_URL}"
+        f"/videos/{video.id}"
+        f"/review"
+        f"?token={quote(review_token)}"
+    )
+
+    background_tasks.add_task(
+        send_video_review_email,
+        title=video.title,
+        uploader_email=
+            current_user.email,
+        review_url=review_url,
+    )
+
+    logger.info(
+        "video review notification resent",
+        extra={
+            "event":
+                "video_review_resent",
+            "videoId":
+                str(video_id),
+            "userId":
+                str(current_user.id),
+        },
+    )
+
+    return schemas.ResendReviewResponse(
+        video=serialize_video(video),
+        next_resend_allowed_at=(
+            now + timedelta(days=1)
+        ),
     )
 
 

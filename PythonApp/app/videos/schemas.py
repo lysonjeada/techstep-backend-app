@@ -22,9 +22,19 @@ class VideoOut(BaseModel):
 
     stream_path: str | None = None
 
+    # Só preenchido quando status == "pending": quando o botão de
+    # reenviar a notificação de revisão volta a ficar disponível
+    # (1x por dia por vídeo).
+    next_resend_allowed_at: datetime | None = None
+
     model_config = ConfigDict(
         from_attributes=True
     )
+
+
+class ResendReviewResponse(BaseModel):
+    video: VideoOut
+    next_resend_allowed_at: datetime
 
 
 class VideoPageResponse(BaseModel):
