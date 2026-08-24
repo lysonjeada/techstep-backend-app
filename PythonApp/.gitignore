@@ -3,3 +3,11 @@
 !.env.example
 alembic.ini
 database.py
+
+venv/
+.venv/
+.venv-python39-backup/
+__pycache__/
+*.pyc
+.coverage
+.pytest_cache/
