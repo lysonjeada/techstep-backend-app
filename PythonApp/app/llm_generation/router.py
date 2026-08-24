@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from fastapi import (
     APIRouter,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -37,6 +38,12 @@ from .schemas import (
     SimulationEvaluationRequest,
     SimulationEvaluationResponse,
     SimulationQuestionsRequest,
+)
+
+from app.rate_limit.service import (
+    OPENAI_ENDPOINT_MAX,
+    OPENAI_ENDPOINT_WINDOW_SECONDS,
+    ip_rate_limiter,
 )
 
 
@@ -75,6 +82,13 @@ async def generate_questions(
     ),
     resume: Optional[UploadFile] = File(
         None
+    ),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "openai-generate-questions",
+            OPENAI_ENDPOINT_MAX,
+            OPENAI_ENDPOINT_WINDOW_SECONDS,
+        )
     ),
 ):
     started_at = time.perf_counter()
@@ -489,7 +503,14 @@ Regras:
     "/resume-feedback/"
 )
 async def resume_feedback(
-    resume: UploadFile = File(...)
+    resume: UploadFile = File(...),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "openai-resume-feedback",
+            OPENAI_ENDPOINT_MAX,
+            OPENAI_ENDPOINT_WINDOW_SECONDS,
+        )
+    ),
 ):
     started_at = time.perf_counter()
 
@@ -728,7 +749,14 @@ async def resume_feedback(
     "/submit-feedback/"
 )
 async def submit_resume(
-    resume: UploadFile = File(...)
+    resume: UploadFile = File(...),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "openai-submit-feedback",
+            OPENAI_ENDPOINT_MAX,
+            OPENAI_ENDPOINT_WINDOW_SECONDS,
+        )
+    ),
 ):
     started_at = time.perf_counter()
 

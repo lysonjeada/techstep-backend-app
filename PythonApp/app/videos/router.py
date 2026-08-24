@@ -38,6 +38,12 @@ from app.auth.dependencies import (
 )
 from app.database import get_db
 
+from app.rate_limit.service import (
+    VIDEO_UPLOAD_MAX,
+    VIDEO_UPLOAD_WINDOW_SECONDS,
+    user_rate_limiter,
+)
+
 from . import (
     models,
     schemas,
@@ -184,6 +190,14 @@ async def upload_video(
 
     current_user: app_models.User =
         Depends(get_current_user),
+
+    _rate_limit: None = Depends(
+        user_rate_limiter(
+            "video-upload",
+            VIDEO_UPLOAD_MAX,
+            VIDEO_UPLOAD_WINDOW_SECONDS,
+        )
+    ),
 ):
     normalized_title = title.strip()
 
@@ -926,6 +940,13 @@ ID:
         )
     )
 
+    # Invalida o link de revisão: sem isso o mesmo token continuaria
+    # válido por até 7 dias e poderia ser reutilizado para reverter
+    # a decisão (ex.: aprovar e, em seguida, rejeitar com o mesmo link).
+    video.review_token_expires_at = (
+        datetime.now(timezone.utc)
+    )
+
     db.commit()
     db.refresh(video)
 
@@ -1054,6 +1075,12 @@ Video ID:
         datetime.now(
             timezone.utc
         )
+    )
+
+    # Ver comentário equivalente em approve_video: invalida o link de
+    # revisão para impedir reuso do token depois da decisão.
+    video.review_token_expires_at = (
+        datetime.now(timezone.utc)
     )
 
     db.commit()

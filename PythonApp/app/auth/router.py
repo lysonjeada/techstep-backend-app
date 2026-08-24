@@ -60,6 +60,17 @@ from app.auth.token_service import (
     create_access_token,
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 )
+from app.rate_limit.service import (
+    LOGIN_MAX,
+    LOGIN_WINDOW_SECONDS,
+    REGISTER_MAX,
+    REGISTER_WINDOW_SECONDS,
+    RESEND_VERIFICATION_MAX,
+    RESEND_VERIFICATION_WINDOW_SECONDS,
+    VERIFY_EMAIL_MAX,
+    VERIFY_EMAIL_WINDOW_SECONDS,
+    ip_rate_limiter,
+)
 
 router = APIRouter(
     prefix="/auth",
@@ -80,6 +91,11 @@ def register_user(
     request: auth_schemas.AuthenticationRegisterRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "register", REGISTER_MAX, REGISTER_WINDOW_SECONDS
+        )
+    ),
 ):
     normalized_email = (
         request.email
@@ -230,6 +246,13 @@ def register_user(
 def verify_email(
     request: VerifyEmailRequest,
     db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "verify-email",
+            VERIFY_EMAIL_MAX,
+            VERIFY_EMAIL_WINDOW_SECONDS,
+        )
+    ),
 ):
     normalized_email = (
         request.email
@@ -283,6 +306,13 @@ def resend_verification_code(
     request: ResendVerificationRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "resend-verification",
+            RESEND_VERIFICATION_MAX,
+            RESEND_VERIFICATION_WINDOW_SECONDS,
+        )
+    ),
 ):
     normalized_email = (
         request.email
@@ -346,6 +376,11 @@ def resend_verification_code(
 def login_user(
     user_credentials: app_schemas.UserLogin = Body(...),
     db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "login", LOGIN_MAX, LOGIN_WINDOW_SECONDS
+        )
+    ),
 ):
     print(
         "🟢 ENTROU NO ENDPOINT DE LOGIN",

@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import app.auth.models
 import app.tutors.models
 import app.videos.models
+import app.rate_limit.models
 
 # Caminho absoluto da pasta PythonApp.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

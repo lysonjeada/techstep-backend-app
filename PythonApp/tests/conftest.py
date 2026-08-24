@@ -114,6 +114,36 @@ def _mock_verification_email(monkeypatch):
     return sent_emails
 
 
+@pytest.fixture(autouse=True)
+def _mock_video_review_email(monkeypatch):
+    """Mesma ideia acima, para o e-mail de "vídeo aguardando revisão"
+    disparado em background pelo upload de vídeo. Sem isso, qualquer
+    teste que faça upload real (via POST /videos/) estouraria a rede
+    de proteção contra chamadas SMTP reais.
+    """
+
+    import app.videos.router as videos_router_module
+
+    sent_review_emails = []
+
+    def _fake_send(*, title, uploader_email, review_url):
+        sent_review_emails.append(
+            {
+                "title": title,
+                "uploader_email": uploader_email,
+                "review_url": review_url,
+            }
+        )
+
+    monkeypatch.setattr(
+        videos_router_module,
+        "send_video_review_email",
+        _fake_send,
+    )
+
+    return sent_review_emails
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _setup_schema():
     Base.metadata.drop_all(bind=engine)

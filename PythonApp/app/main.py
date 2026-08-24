@@ -8,6 +8,7 @@ from app import database
 import app.models
 import app.interview_simulation.models
 import app.auth.models
+import app.rate_limit.models
 
 import time
 import uuid
