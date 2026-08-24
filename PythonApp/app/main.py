@@ -9,6 +9,7 @@ import app.models
 import app.interview_simulation.models
 import app.auth.models
 import app.rate_limit.models
+import app.credits.models
 
 import time
 import uuid
@@ -31,6 +32,9 @@ from app.tutors.router import (
 )
 from app.videos.router import (
     router as videos_router,
+)
+from app.credits.router import (
+    router as credits_router,
 )
 
 from app.observability import (
@@ -139,6 +143,7 @@ app.include_router(interview_simulation_router)
 app.include_router(dashboard_router)
 app.include_router(tutors_router)
 app.include_router(videos_router)
+app.include_router(credits_router)
 
 # Todos os models importados acima serão registrados neste metadata.
 database.Base.metadata.create_all(

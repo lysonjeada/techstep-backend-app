@@ -86,6 +86,42 @@ def create_video(db, user, **overrides):
     return video
 
 
+def create_ai_credit_balance(db, user, balance=0):
+    from app.credits import service as credits_service
+
+    credits_service.ensure_balance_row(db, user.id)
+
+    if balance:
+        credits_service.credit(db, user.id, balance)
+
+    return credits_service.get_balance(db, user.id)
+
+
+def create_ai_credit_purchase(db, user, **overrides):
+    from app.credits.models import AICreditPurchase
+
+    suffix = unique_suffix()
+
+    defaults = dict(
+        user_id=user.id,
+        apple_transaction_id=f"apple-txn-{suffix}",
+        apple_original_transaction_id=f"apple-txn-{suffix}",
+        product_id="lys.com.career-app.credits.10",
+        credits_granted=10,
+        environment="Sandbox",
+    )
+
+    defaults.update(overrides)
+
+    purchase = AICreditPurchase(**defaults)
+
+    db.add(purchase)
+    db.commit()
+    db.refresh(purchase)
+
+    return purchase
+
+
 def create_refresh_token_row(db, user, **overrides):
     from app.auth.models import RefreshToken
 

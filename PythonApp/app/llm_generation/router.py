@@ -40,11 +40,7 @@ from .schemas import (
     SimulationQuestionsRequest,
 )
 
-from app.rate_limit.service import (
-    OPENAI_ENDPOINT_MAX,
-    OPENAI_ENDPOINT_WINDOW_SECONDS,
-    ip_rate_limiter,
-)
+from app.credits.service import ai_credit_gate
 
 
 load_dotenv()
@@ -83,12 +79,8 @@ async def generate_questions(
     resume: Optional[UploadFile] = File(
         None
     ),
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-generate-questions",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    _credit_gate=Depends(
+        ai_credit_gate("generate_questions")
     ),
 ):
     started_at = time.perf_counter()
@@ -504,12 +496,8 @@ Regras:
 )
 async def resume_feedback(
     resume: UploadFile = File(...),
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-resume-feedback",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    _credit_gate=Depends(
+        ai_credit_gate("resume_feedback")
     ),
 ):
     started_at = time.perf_counter()
@@ -750,12 +738,8 @@ async def resume_feedback(
 )
 async def submit_resume(
     resume: UploadFile = File(...),
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-submit-feedback",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    credit_gate=Depends(
+        ai_credit_gate("resume_feedback_submit")
     ),
 ):
     started_at = time.perf_counter()
@@ -792,7 +776,15 @@ async def submit_resume(
         task = (
             process_resume_feedback
             .delay(
-                content
+                content,
+                user_id=str(
+                    credit_gate.current_user.id
+                ),
+                credit_cost=(
+                    credit_gate.cost
+                    if credit_gate.credit_consumed
+                    else 0
+                ),
             )
         )
 

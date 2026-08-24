@@ -6,12 +6,22 @@ OpenAI.
 A lógica pura do algoritmo (janela fixa, reset, contadores
 independentes) já é coberta em tests/unit/test_rate_limit_service.py e
 não é duplicada aqui. Usamos os limites reais importados de
-app.rate_limit.service (em vez de números fixos) para que estes testes
-não fiquem desatualizados se os defaults mudarem.
+app.rate_limit.service/app.credits.config (em vez de números fixos)
+para que estes testes não fiquem desatualizados se os defaults
+mudarem.
+
+Os endpoints que chamam a OpenAI agora exigem autenticação e são
+protegidos por app.credits.service.ai_credit_gate (que estende esse
+mesmo rate limiter — dentro do limite gratuito por usuário, o
+comportamento é idêntico ao rate limiter puro testado aqui; o que
+acontece depois do limite gratuito estourar, incluindo débito de
+créditos e reembolso, é coberto em
+tests/integration/test_ai_credit_gate.py).
 """
 
 import pytest
 
+from app.credits.config import AI_CREDIT_FREE_LIMIT
 from app.rate_limit import service as rate_limit_service
 from tests import factories
 
@@ -155,70 +165,111 @@ async def test_video_upload_rate_limit_is_independent_per_user(
     assert other_user_response.status_code == 201
 
 
-# --- endpoints que chamam a OpenAI: por IP ---
+# --- endpoints que chamam a OpenAI: autenticados, por usuário ---
 #
-# Usamos job_title vazio de propósito: o rate limiter roda como
-# dependency ANTES da validação do corpo da rota, então a requisição
-# já é contada mesmo que o handler rejeite com 422 antes de qualquer
-# chamada à OpenAI. Isso prova que o limite protege o endpoint sem
-# precisar mockar o client da OpenAI aqui (unit tests de mocking da
-# OpenAI ficam na Fase 2, com o endpoint testado de ponta a ponta).
+# Usamos job_title vazio de propósito: o gate de créditos (que
+# encapsula o mesmo rate limiter) roda como dependency ANTES da
+# validação do corpo da rota, então a requisição já é contada mesmo
+# que o handler rejeite com 422 antes de qualquer chamada à OpenAI.
+# Isso prova que o limite gratuito protege o endpoint sem precisar
+# mockar o client da OpenAI aqui. Ficam sem saldo comprado (balance=0)
+# de propósito: dentro do limite gratuito por usuário
+# (AI_CREDIT_FREE_LIMIT), nenhuma requisição toca no saldo.
 
 
 async def test_simulation_questions_openai_endpoint_is_rate_limited(
-    client,
+    authenticated_client,
 ):
     payload = {"job_title": "", "seniority": "Pleno"}
 
-    for _ in range(rate_limit_service.OPENAI_ENDPOINT_MAX):
-        response = await client.post(
+    for _ in range(AI_CREDIT_FREE_LIMIT):
+        response = await authenticated_client.post(
             "/interview-simulation/questions", json=payload
         )
         assert response.status_code == 422
 
-    blocked_response = await client.post(
+    blocked_response = await authenticated_client.post(
         "/interview-simulation/questions", json=payload
     )
-    assert blocked_response.status_code == 429
+    assert blocked_response.status_code == 402
+    assert (
+        blocked_response.json()["detail"]["code"]
+        == "INSUFFICIENT_AI_CREDITS"
+    )
 
 
 async def test_generate_interview_questions_endpoint_is_rate_limited(
-    client,
+    authenticated_client,
 ):
     data = {"job_title": "", "seniority": "Pleno"}
 
-    for _ in range(rate_limit_service.OPENAI_ENDPOINT_MAX):
-        response = await client.post(
+    for _ in range(AI_CREDIT_FREE_LIMIT):
+        response = await authenticated_client.post(
             "/generate-interview-questions/", data=data
         )
         assert response.status_code == 422
 
-    blocked_response = await client.post(
+    blocked_response = await authenticated_client.post(
         "/generate-interview-questions/", data=data
     )
-    assert blocked_response.status_code == 429
+    assert blocked_response.status_code == 402
 
 
-async def test_openai_endpoint_rate_limit_is_independent_per_scope(
+async def test_openai_endpoint_free_limit_requires_authentication(
     client,
 ):
-    # Esgotar o orçamento de "openai-simulation-questions" não afeta
-    # o orçamento (mesmo limite, chave de escopo diferente) de
-    # "openai-generate-questions".
+    response = await client.post(
+        "/interview-simulation/questions",
+        json={"job_title": "Dev", "seniority": "Pleno"},
+    )
+
+    assert response.status_code == 401
+
+
+async def test_openai_endpoint_free_limit_is_independent_per_scope(
+    authenticated_client,
+):
+    # Esgotar o orçamento gratuito de "simulation_questions" não afeta
+    # o orçamento (mesmo limite, escopo diferente) de
+    # "generate_questions".
     payload = {"job_title": "", "seniority": "Pleno"}
-    for _ in range(rate_limit_service.OPENAI_ENDPOINT_MAX):
-        response = await client.post(
+
+    for _ in range(AI_CREDIT_FREE_LIMIT):
+        response = await authenticated_client.post(
             "/interview-simulation/questions", json=payload
         )
         assert response.status_code == 422
 
-    blocked_response = await client.post(
+    blocked_response = await authenticated_client.post(
         "/interview-simulation/questions", json=payload
     )
-    assert blocked_response.status_code == 429
+    assert blocked_response.status_code == 402
 
-    other_scope_response = await client.post(
+    other_scope_response = await authenticated_client.post(
         "/generate-interview-questions/",
         data={"job_title": "", "seniority": "Pleno"},
     )
     assert other_scope_response.status_code == 422
+
+
+async def test_openai_endpoint_free_limit_is_independent_per_user(
+    authenticated_client, authenticated_client_b
+):
+    payload = {"job_title": "", "seniority": "Pleno"}
+
+    for _ in range(AI_CREDIT_FREE_LIMIT):
+        response = await authenticated_client.post(
+            "/interview-simulation/questions", json=payload
+        )
+        assert response.status_code == 422
+
+    blocked_response = await authenticated_client.post(
+        "/interview-simulation/questions", json=payload
+    )
+    assert blocked_response.status_code == 402
+
+    # Usuário B tem seu próprio orçamento gratuito, independente de A.
+    other_user_response = await authenticated_client_b.post(
+        "/interview-simulation/questions", json=payload
+    )
+    assert other_user_response.status_code == 422

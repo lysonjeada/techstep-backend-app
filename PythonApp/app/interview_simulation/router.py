@@ -39,11 +39,7 @@ from app.interview_simulation.schemas import (
     SimulationQuestionsRequest,
 )
 
-from app.rate_limit.service import (
-    OPENAI_ENDPOINT_MAX,
-    OPENAI_ENDPOINT_WINDOW_SECONDS,
-    ip_rate_limiter,
-)
+from app.credits.service import ai_credit_gate
 
 
 load_dotenv()
@@ -75,12 +71,8 @@ OPENAI_MODEL = os.getenv(
 )
 async def generate_simulation_questions(
     request: SimulationQuestionsRequest,
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-simulation-questions",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    _credit_gate=Depends(
+        ai_credit_gate("simulation_questions")
     ),
 ):
     started_at = time.perf_counter()
@@ -387,12 +379,8 @@ def parse_questions(
 )
 async def transcribe_interview_audio(
     audio: UploadFile = File(...),
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-transcribe",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    _credit_gate=Depends(
+        ai_credit_gate("simulation_transcribe")
     ),
 ):
     started_at = time.perf_counter()
@@ -685,12 +673,8 @@ async def transcribe_interview_audio(
 )
 async def evaluate_interview_simulation(
     request: SimulationEvaluationRequest,
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-simulation-evaluate",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    _credit_gate=Depends(
+        ai_credit_gate("simulation_evaluate")
     ),
 ):
     started_at = time.perf_counter()

@@ -14,16 +14,12 @@ from fastapi import (
 )
 
 from app.config import OPENAI_MODEL
+from app.credits.service import ai_credit_gate
 from app.llm_generation.pdf_utils import (
     extract_text_from_pdf,
 )
 from app.observability import logger
 from app.openai_client import client
-from app.rate_limit.service import (
-    OPENAI_ENDPOINT_MAX,
-    OPENAI_ENDPOINT_WINDOW_SECONDS,
-    ip_rate_limiter,
-)
 from app.study_plan.service import (
     create_study_plan,
 )
@@ -53,12 +49,8 @@ async def generate_study_plan(
     resume: Optional[UploadFile] = File(
         None
     ),
-    _rate_limit: None = Depends(
-        ip_rate_limiter(
-            "openai-study-plan",
-            OPENAI_ENDPOINT_MAX,
-            OPENAI_ENDPOINT_WINDOW_SECONDS,
-        )
+    _credit_gate=Depends(
+        ai_credit_gate("study_plan")
     ),
 ):
     started_at = time.perf_counter()

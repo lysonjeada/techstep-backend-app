@@ -81,14 +81,17 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def check_rate_limit(
+def increment_and_get_count(
     db: Session,
     key: str,
-    limit: int,
     window_seconds: int,
-) -> None:
+) -> tuple[int, datetime]:
     """Incrementa o contador de `key` numa janela fixa de
-    `window_seconds` e levanta 429 se `limit` já foi atingido.
+    `window_seconds` e devolve (count, window_start) — sem levantar
+    429, quem decide o que fazer com a contagem é o chamador (usado
+    tanto por check_rate_limit quanto pelo gate de créditos de IA em
+    app.credits.service, que passa a agir só depois desse limite
+    gratuito estourar).
 
     O upsert é atômico no Postgres (o lock da linha em conflito
     serializa concorrência entre instâncias/processos), então não há
@@ -109,7 +112,23 @@ def check_rate_limit(
 
     db.commit()
 
-    count, window_start = row
+    return row.count, row.window_start
+
+
+def check_rate_limit(
+    db: Session,
+    key: str,
+    limit: int,
+    window_seconds: int,
+) -> None:
+    """Levanta 429 se `key` já atingiu `limit` requisições na janela
+    atual (ver increment_and_get_count)."""
+
+    count, window_start = increment_and_get_count(
+        db, key, window_seconds
+    )
+
+    now = _now()
 
     if count > limit:
         retry_after = max(
