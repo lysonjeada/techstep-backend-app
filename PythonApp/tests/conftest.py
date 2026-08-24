@@ -44,6 +44,8 @@ _TEST_UPLOAD_DIR = Path(tempfile.mkdtemp(prefix="techstep-test-uploads-"))
 os.environ.setdefault("VIDEO_UPLOAD_DIR", str(_TEST_UPLOAD_DIR))
 os.environ.setdefault("PUBLIC_API_URL", "http://testserver")
 
+import socket
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.orm import sessionmaker
@@ -54,6 +56,62 @@ from app.auth.token_service import create_access_token
 from app.database import Base, engine, get_db
 
 from tests import factories
+
+
+class _BlockedNetworkCall(RuntimeError):
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _block_real_network_calls(monkeypatch):
+    """Rede de proteção: nenhum teste pode escapar para a internet real.
+
+    Isso cobre chamadas OpenAI e SMTP não mockadas (e qualquer outro
+    socket TCP real), mesmo que um teste individual esqueça de mockar
+    o client. Conexões ao Postgres de teste continuam funcionando
+    porque psycopg2 fala com o socket via extensão C, fora do alcance
+    do módulo `socket` do Python.
+    """
+
+    def _blocked_connect(self, address, *args, **kwargs):
+        raise _BlockedNetworkCall(
+            "Chamada de rede real bloqueada durante os testes "
+            f"(destino: {address!r}). Mocke o client/serviço externo."
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", _blocked_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", _blocked_connect)
+
+
+@pytest.fixture(autouse=True)
+def _mock_verification_email(monkeypatch):
+    """SMTP nunca é configurado em ambiente de teste (de propósito).
+
+    Sem este mock, qualquer endpoint que dispare
+    `send_verification_email` em background (register/resend) estouraria
+    RuntimeError por falta de config SMTP. Testes que querem inspecionar
+    a chamada podem sobrescrever `app.auth.router.send_verification_email`
+    novamente com seu próprio monkeypatch.
+    """
+
+    import app.auth.router as auth_router_module
+
+    sent_emails = []
+
+    def _fake_send(recipient_email, recipient_name, code):
+        sent_emails.append(
+            {
+                "email": recipient_email,
+                "name": recipient_name,
+                "code": code,
+            }
+        )
+
+    monkeypatch.setattr(
+        auth_router_module, "send_verification_email", _fake_send
+    )
+
+    return sent_emails
 
 
 @pytest.fixture(scope="session", autouse=True)
