@@ -190,3 +190,16 @@ async def test_approved_videos_feed_never_includes_pending_or_rejected(
 
     ids = [item["id"] for item in response.json()["items"]]
     assert ids == [str(approved.id)]
+
+
+async def test_delete_video_of_other_user_is_forbidden(
+    authenticated_client, db_session, second_user
+):
+    video = factories.create_video(db_session, second_user)
+
+    response = await authenticated_client.delete(f"/videos/{video.id}")
+    assert response.status_code == 403
+
+    # O vídeo do outro usuário continua existindo.
+    still_there = await authenticated_client.get(f"/videos/{video.id}")
+    assert still_there.status_code in (200, 403)

@@ -526,6 +526,83 @@ def get_approved_videos(
     )
 
 
+# MARK: Delete
+
+
+@router.delete(
+    "/{video_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_video(
+    video_id: UUID,
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    video = (
+        db.query(models.Video)
+        .filter(
+            models.Video.id
+            == video_id
+        )
+        .first()
+    )
+
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=
+                "Vídeo não encontrado.",
+        )
+
+    if (
+        video.user_id
+        != current_user.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=
+                "Você não pode excluir este vídeo.",
+        )
+
+    file_path = (
+        UPLOAD_DIR
+        / video.file_name
+    )
+
+    db.delete(video)
+    db.commit()
+
+    if file_path.exists():
+        try:
+            file_path.unlink()
+
+        except OSError:
+            logger.exception(
+                "failed to remove video file after deletion",
+                extra={
+                    "event":
+                        "video_file_removal_failed",
+                    "videoId":
+                        str(video_id),
+                },
+            )
+
+    logger.info(
+        "video deleted",
+        extra={
+            "event":
+                "video_deleted",
+            "videoId":
+                str(video_id),
+            "userId":
+                str(current_user.id),
+        },
+    )
+
+
 # MARK: Video details
 
 
