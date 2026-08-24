@@ -23,6 +23,11 @@ from app.openai_client import client
 from app.study_plan.service import (
     create_study_plan,
 )
+from app.uploads.validation import (
+    MAX_PDF_SIZE_BYTES,
+    looks_like_pdf,
+    read_upload_with_limit,
+)
 
 from .schemas import StudyPlanResponse
 
@@ -199,7 +204,14 @@ async def generate_study_plan(
                     )
 
                 content = (
-                    await resume.read()
+                    await read_upload_with_limit(
+                        resume,
+                        MAX_PDF_SIZE_BYTES,
+                        detail=(
+                            "O currículo excede o "
+                            "tamanho máximo permitido."
+                        ),
+                    )
                 )
 
                 logger.info(
@@ -215,6 +227,15 @@ async def generate_study_plan(
                             len(content),
                     },
                 )
+
+                if content and not looks_like_pdf(content):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "O currículo deve "
+                            "estar em formato PDF."
+                        ),
+                    )
 
                 if content:
                     extraction_started_at = (

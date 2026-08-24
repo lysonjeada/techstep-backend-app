@@ -41,6 +41,12 @@ from app.interview_simulation.schemas import (
 
 from app.credits.service import ai_credit_gate
 
+from app.uploads.validation import (
+    MAX_AUDIO_SIZE_BYTES,
+    is_allowed_audio_content,
+    read_upload_with_limit,
+)
+
 
 load_dotenv()
 
@@ -400,7 +406,14 @@ async def transcribe_interview_audio(
     )
 
     try:
-        content = await audio.read()
+        content = await read_upload_with_limit(
+            audio,
+            MAX_AUDIO_SIZE_BYTES,
+            detail=(
+                "O áudio excede o tamanho "
+                "máximo permitido."
+            ),
+        )
 
         logger.info(
             "interview audio received",
@@ -446,13 +459,26 @@ async def transcribe_interview_audio(
                 ),
             )
 
-        suffix = os.path.splitext(
-            audio.filename
-            or "answer.m4a"
-        )[1]
+        # O Content-Type é só um chute do cliente (o app iOS, por
+        # exemplo, às vezes manda "application/octet-stream"). Os
+        # primeiros bytes do arquivo são a única fonte confiável do
+        # formato real.
+        if not is_allowed_audio_content(content):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "O conteúdo do áudio não "
+                    "corresponde a um formato suportado."
+                ),
+            )
 
-        if not suffix:
-            suffix = ".m4a"
+        # Extensão sempre fixa e gerada pelo servidor — nunca
+        # derivada do filename do cliente. `os.path.splitext` opera
+        # sobre a string crua (não trata "/" como separador de
+        # diretório do jeito que pathlib faz), então um filename tipo
+        # "a.mp4/../../etc/cron.d/x" podia produzir um suffix com "/"
+        # dentro dele e escapar do diretório temporário.
+        suffix = ".m4a"
 
         with tempfile.NamedTemporaryFile(
             mode="wb",

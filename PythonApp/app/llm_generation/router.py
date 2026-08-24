@@ -42,6 +42,12 @@ from .schemas import (
 
 from app.credits.service import ai_credit_gate
 
+from app.uploads.validation import (
+    MAX_PDF_SIZE_BYTES,
+    looks_like_pdf,
+    read_upload_with_limit,
+)
+
 
 load_dotenv()
 
@@ -165,7 +171,24 @@ async def generate_questions(
                         ),
                     )
 
-                content = await resume.read()
+                content = await read_upload_with_limit(
+                    resume,
+                    MAX_PDF_SIZE_BYTES,
+                    detail=(
+                        "O currículo excede o "
+                        "tamanho máximo permitido."
+                    ),
+                )
+
+                if content and not looks_like_pdf(content):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            "O currículo deve "
+                            "ser enviado em "
+                            "formato PDF."
+                        ),
+                    )
 
                 if content:
                     resume_text = (
@@ -529,7 +552,24 @@ async def resume_feedback(
                 ),
             )
 
-        content = await resume.read()
+        content = await read_upload_with_limit(
+            resume,
+            MAX_PDF_SIZE_BYTES,
+            detail=(
+                "O currículo excede o "
+                "tamanho máximo permitido."
+            ),
+        )
+
+        if not content or not looks_like_pdf(content):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "O currículo deve "
+                    "ser enviado em "
+                    "formato PDF."
+                ),
+            )
 
         resume_text = (
             extract_text_from_pdf(
@@ -771,7 +811,24 @@ async def submit_resume(
                 ),
             )
 
-        content = await resume.read()
+        content = await read_upload_with_limit(
+            resume,
+            MAX_PDF_SIZE_BYTES,
+            detail=(
+                "O currículo excede o "
+                "tamanho máximo permitido."
+            ),
+        )
+
+        if not content or not looks_like_pdf(content):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "O currículo deve "
+                    "ser enviado em "
+                    "formato PDF."
+                ),
+            )
 
         task = (
             process_resume_feedback

@@ -126,7 +126,9 @@ async def test_resend_verification_is_rate_limited_per_ip(client):
 async def test_video_upload_is_rate_limited_per_user(
     authenticated_client,
 ):
-    files = {"file": ("clip.mp4", b"fake video bytes", "video/mp4")}
+    files = {
+        "file": ("clip.mp4", factories.FAKE_MP4_BYTES, "video/mp4")
+    }
     data = {"title": "Minha entrevista"}
 
     for _ in range(rate_limit_service.VIDEO_UPLOAD_MAX):
@@ -144,7 +146,9 @@ async def test_video_upload_is_rate_limited_per_user(
 async def test_video_upload_rate_limit_is_independent_per_user(
     authenticated_client, authenticated_client_b
 ):
-    files = {"file": ("clip.mp4", b"fake video bytes", "video/mp4")}
+    files = {
+        "file": ("clip.mp4", factories.FAKE_MP4_BYTES, "video/mp4")
+    }
     data = {"title": "Minha entrevista"}
 
     for _ in range(rate_limit_service.VIDEO_UPLOAD_MAX):

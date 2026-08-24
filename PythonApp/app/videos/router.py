@@ -44,6 +44,10 @@ from app.rate_limit.service import (
     user_rate_limiter,
 )
 
+from app.uploads.validation import (
+    is_allowed_video_content,
+)
+
 from . import (
     models,
     schemas,
@@ -95,12 +99,14 @@ MAX_VIDEO_SIZE = (
 )
 
 
-ALLOWED_TYPES = {
-    "video/mp4",
-    "video/quicktime",
-    "video/x-m4v",
-    "video/webm",
+VIDEO_EXTENSION_BY_CONTENT_TYPE = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-m4v": ".m4v",
+    "video/webm": ".webm",
 }
+
+ALLOWED_TYPES = set(VIDEO_EXTENSION_BY_CONTENT_TYPE)
 
 
 def hash_review_token(
@@ -220,12 +226,14 @@ async def upload_video(
         bytes=secrets.token_bytes(16)
     )
 
-    suffix = Path(
-        file.filename or ""
-    ).suffix.lower()
-
-    if not suffix:
-        suffix = ".mp4"
+    # O nome salvo em disco nunca depende do filename enviado pelo
+    # cliente: é sempre <uuid gerado no servidor> + extensão vinda de
+    # uma tabela fixa indexada pelo Content-Type já validado acima.
+    # Isso fecha qualquer superfície de path traversal via nome de
+    # arquivo.
+    suffix = VIDEO_EXTENSION_BY_CONTENT_TYPE[
+        file.content_type
+    ]
 
     saved_file_name = (
         f"{video_id}{suffix}"
@@ -237,6 +245,7 @@ async def upload_video(
     )
 
     size = 0
+    content_verified = False
 
     try:
         with file_path.open(
@@ -251,6 +260,23 @@ async def upload_video(
                 if not chunk:
                     break
 
+                if not content_verified:
+                    # Os primeiros bytes do arquivo (magic bytes) são
+                    # a única fonte confiável do formato real — o
+                    # Content-Type é só um chute do cliente e pode
+                    # mentir.
+                    if not is_allowed_video_content(chunk):
+                        raise HTTPException(
+                            status_code=
+                                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=(
+                                "O conteúdo do arquivo não "
+                                "corresponde a um vídeo válido."
+                            ),
+                        )
+
+                    content_verified = True
+
                 size += len(chunk)
 
                 if size > MAX_VIDEO_SIZE:
@@ -264,6 +290,13 @@ async def upload_video(
                 destination.write(
                     chunk
                 )
+
+        if not content_verified:
+            raise HTTPException(
+                status_code=
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="O arquivo de vídeo está vazio.",
+            )
 
     except Exception:
         if file_path.exists():
