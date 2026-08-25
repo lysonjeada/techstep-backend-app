@@ -112,6 +112,114 @@ Revisar:
         )
 
 
+def send_upload_review_email(
+    *,
+    title: str,
+    uploader_email: str,
+    review_url: str,
+    thumbnail_review_url: str | None = None,
+):
+    """Envia vídeo (e, se houver, thumbnail customizada) num único
+    e-mail — no upload, os dois ficam pendentes ao mesmo tempo, e
+    mandar duas mensagens separadas (duas conexões SMTP quase
+    simultâneas) demonstrou perder uma delas silenciosamente (sem
+    exceção no servidor, mas sem chegar na caixa de entrada)."""
+
+    message = EmailMessage()
+
+    message["Subject"] = (
+        f"Novo vídeo aguardando revisão: {title}"
+    )
+
+    message["From"] = SMTP_FROM_EMAIL
+    message["To"] = VIDEO_REVIEW_EMAIL
+
+    thumbnail_text = (
+        f"""
+
+Uma thumbnail customizada também foi enviada e precisa de revisão separada:
+{thumbnail_review_url}
+"""
+        if thumbnail_review_url
+        else ""
+    )
+
+    message.set_content(
+        f"""
+Novo vídeo enviado para o TechStep.
+
+Título:
+{title}
+
+Enviado por:
+{uploader_email}
+
+Revisar vídeo:
+{review_url}
+{thumbnail_text}"""
+    )
+
+    thumbnail_html = (
+        f"""
+                <p>
+                    Uma thumbnail customizada também foi enviada e
+                    precisa de revisão separada:
+                </p>
+
+                <p>
+                    <a href="{thumbnail_review_url}">
+                        Revisar thumbnail
+                    </a>
+                </p>
+        """
+        if thumbnail_review_url
+        else ""
+    )
+
+    message.add_alternative(
+        f"""
+        <html>
+            <body>
+                <h2>Novo vídeo aguardando revisão</h2>
+
+                <p>
+                    <strong>Título:</strong>
+                    {title}
+                </p>
+
+                <p>
+                    <strong>Enviado por:</strong>
+                    {uploader_email}
+                </p>
+
+                <p>
+                    <a href="{review_url}">
+                        Revisar vídeo
+                    </a>
+                </p>
+                {thumbnail_html}
+            </body>
+        </html>
+        """,
+        subtype="html",
+    )
+
+    with smtplib.SMTP(
+        SMTP_HOST,
+        SMTP_PORT,
+    ) as server:
+        server.starttls()
+
+        server.login(
+            SMTP_USERNAME,
+            SMTP_PASSWORD,
+        )
+
+        server.send_message(
+            message
+        )
+
+
 def send_thumbnail_review_email(
     *,
     title: str,

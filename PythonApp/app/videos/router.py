@@ -59,6 +59,7 @@ from . import (
 
 from .email_service import (
     send_thumbnail_review_email,
+    send_upload_review_email,
     send_video_review_email,
 )
 
@@ -296,6 +297,31 @@ def validate_thumbnail_review_token(
                 status.HTTP_401_UNAUTHORIZED,
             detail=
                 "Token de revisão expirado.",
+        )
+
+
+def _send_email_task(
+    send_fn,
+    **kwargs,
+) -> None:
+    """`BackgroundTasks` roda as tarefas de uma requisição em
+    sequência e para na primeira que lançar exceção (starlette não
+    isola cada uma) — sem isso, uma falha ao enviar o e-mail de
+    revisão do vídeo derrubaria silenciosamente o envio do e-mail de
+    revisão da thumbnail agendado na mesma requisição, e vice-versa."""
+
+    try:
+        send_fn(**kwargs)
+
+    except Exception:
+        logger.exception(
+            "failed to send review email",
+            extra={
+                "event":
+                    "review_email_send_failed",
+                "emailFunction":
+                    send_fn.__name__,
+            },
         )
 
 
@@ -677,29 +703,30 @@ async def upload_video(
         f"?token={quote(review_token)}"
     )
 
-    background_tasks.add_task(
-        send_video_review_email,
-        title=video.title,
-        uploader_email=
-            current_user.email,
-        review_url=review_url,
-    )
-
-    if thumbnail_review_token:
-        thumbnail_review_url = (
+    thumbnail_review_url = (
+        (
             f"{PUBLIC_API_URL}"
             f"/videos/{video.id}"
             f"/thumbnail-review"
             f"?token={quote(thumbnail_review_token)}"
         )
+        if thumbnail_review_token
+        else None
+    )
 
-        background_tasks.add_task(
-            send_thumbnail_review_email,
-            title=video.title,
-            uploader_email=
-                current_user.email,
-            review_url=thumbnail_review_url,
-        )
+    # Vídeo e thumbnail (quando enviada junto) vão num único e-mail:
+    # duas conexões SMTP quase simultâneas para o mesmo destinatário
+    # já mostraram entregar só uma das duas silenciosamente.
+    background_tasks.add_task(
+        _send_email_task,
+        send_upload_review_email,
+        title=video.title,
+        uploader_email=
+            current_user.email,
+        review_url=review_url,
+        thumbnail_review_url=
+            thumbnail_review_url,
+    )
 
     return serialize_video(
         video
@@ -1075,6 +1102,7 @@ def resend_review_notification(
     )
 
     background_tasks.add_task(
+        _send_email_task,
         send_video_review_email,
         title=video.title,
         uploader_email=
@@ -1209,6 +1237,7 @@ async def update_thumbnail(
     )
 
     background_tasks.add_task(
+        _send_email_task,
         send_thumbnail_review_email,
         title=video.title,
         uploader_email=
@@ -1334,6 +1363,7 @@ def resend_thumbnail_review_notification(
     )
 
     background_tasks.add_task(
+        _send_email_task,
         send_thumbnail_review_email,
         title=video.title,
         uploader_email=
