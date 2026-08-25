@@ -1506,6 +1506,13 @@ def get_video_file(
             video.content_type,
         filename=
             video.original_file_name,
+        # Sem isso, o Starlette usa "attachment" como default (por
+        # causa de `filename=`), e o AVPlayer do app trata a resposta
+        # como download em vez de mídia reproduzível inline — o
+        # vídeo aparece com status "Aprovado" mas nunca carrega no
+        # player.
+        content_disposition_type=
+            "inline",
     )
 
 
