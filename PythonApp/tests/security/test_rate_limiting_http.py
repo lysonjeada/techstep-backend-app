@@ -65,6 +65,16 @@ async def test_login_rate_limit_is_independent_per_ip(client, db_session):
     assert other_ip_response.status_code == 401
 
 
+# --- endpoint de debug de IP ---
+
+
+async def test_client_ip_endpoint_reflects_forwarded_for(client):
+    client.headers["X-Forwarded-For"] = "203.0.113.9, 10.0.0.1"
+    response = await client.get("/system/client-ip")
+    assert response.status_code == 200
+    assert response.json() == {"ip": "203.0.113.9"}
+
+
 # --- registro: por IP ---
 
 

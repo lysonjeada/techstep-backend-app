@@ -36,6 +36,7 @@ from app.videos.router import (
 from app.credits.router import (
     router as credits_router,
 )
+from app.rate_limit.service import _client_ip
 
 from app.observability import (
     logger,
@@ -133,6 +134,16 @@ async def observability_middleware(
         )
 
         raise
+
+@app.get("/system/client-ip", include_in_schema=False)
+def get_client_ip(request: Request):
+    """Devolve o IP exatamente como o rate limiter o calcula (ver
+    app.rate_limit.service._client_ip), para usar em
+    RATE_LIMIT_EXEMPT_IPS sem adivinhar entre IP local/de rede/público.
+    """
+
+    return {"ip": _client_ip(request)}
+
 
 app.include_router(auth_router)
 app.include_router(interviews_router)

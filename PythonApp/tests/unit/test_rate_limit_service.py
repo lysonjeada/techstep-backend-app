@@ -89,6 +89,29 @@ def test_window_resets_after_it_expires(db_session, monkeypatch):
     rate_limit_service.check_rate_limit(db_session, key, 2, 30)
 
 
+def test_ip_rate_limiter_skips_check_for_exempt_ip(
+    db_session, monkeypatch
+):
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        rate_limit_service, "EXEMPT_IPS", {"9.9.9.9"}
+    )
+
+    request = MagicMock()
+    request.headers = {}
+    request.client.host = "9.9.9.9"
+
+    dependency = rate_limit_service.ip_rate_limiter(
+        "unit-test-exempt", limit=1, window_seconds=60
+    )
+
+    # Excede o limite (1) várias vezes sem levantar 429, pois o IP
+    # está isento.
+    for _ in range(5):
+        dependency(request=request, db=db_session)
+
+
 def test_concurrent_requests_within_same_window_are_all_counted(
     db_session,
 ):

@@ -18,10 +18,18 @@ LOGIN_WINDOW_SECONDS = int(
     os.getenv("RATE_LIMIT_LOGIN_WINDOW_SECONDS", "60")
 )
 
-REGISTER_MAX = int(os.getenv("RATE_LIMIT_REGISTER_MAX", "5"))
+REGISTER_MAX = int(os.getenv("RATE_LIMIT_REGISTER_MAX", "3"))
 REGISTER_WINDOW_SECONDS = int(
     os.getenv("RATE_LIMIT_REGISTER_WINDOW_SECONDS", "60")
 )
+
+# IPs que não passam pelo rate limit por IP (ex.: máquina de quem está
+# testando o cadastro manualmente). Lista separada por vírgula.
+EXEMPT_IPS = {
+    ip.strip()
+    for ip in os.getenv("RATE_LIMIT_EXEMPT_IPS", "").split(",")
+    if ip.strip()
+}
 
 VERIFY_EMAIL_MAX = int(os.getenv("RATE_LIMIT_VERIFY_EMAIL_MAX", "10"))
 VERIFY_EMAIL_WINDOW_SECONDS = int(
@@ -160,7 +168,12 @@ def ip_rate_limiter(scope: str, limit: int, window_seconds: int):
         request: Request,
         db: Session = Depends(get_db),
     ) -> None:
-        key = f"{scope}:ip:{_client_ip(request)}"
+        client_ip = _client_ip(request)
+
+        if client_ip in EXEMPT_IPS:
+            return
+
+        key = f"{scope}:ip:{client_ip}"
         check_rate_limit(db, key, limit, window_seconds)
 
     return _dependency
