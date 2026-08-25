@@ -106,6 +106,61 @@ class Video(Base):
         nullable=True,
     )
 
+    # --- Thumbnail ---
+    #
+    # `thumbnail_file_name` é sempre a imagem "ao vivo" (visível para
+    # todo mundo): o frame gerado automaticamente no app a partir do
+    # 1º segundo do vídeo, ou a última imagem customizada já aprovada.
+    # Uma edição de thumbnail enviada pelo usuário nunca sobrescreve
+    # esse arquivo diretamente — ela fica em `pending_thumbnail_*` até
+    # ser aprovada por e-mail (mesmo mecanismo de token do vídeo),
+    # exatamente para que trocar a thumbnail não publique uma imagem
+    # não moderada instantaneamente.
+    thumbnail_file_name = Column(
+        String(255),
+        nullable=True,
+    )
+
+    # "auto" (gerado no app, sem moderação) ou "custom" (imagem do
+    # usuário já aprovada) — describe o arquivo atualmente em
+    # `thumbnail_file_name`.
+    thumbnail_source = Column(
+        String(20),
+        nullable=False,
+        default="auto",
+        server_default="auto",
+    )
+
+    pending_thumbnail_file_name = Column(
+        String(255),
+        nullable=True,
+    )
+
+    thumbnail_review_token_hash = Column(
+        String(64),
+        nullable=True,
+    )
+
+    thumbnail_review_token_expires_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Mesmo propósito de review_notification_sent_at, mas para o
+    # e-mail de revisão da thumbnail customizada pendente.
+    thumbnail_review_notification_sent_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Motivo da última rejeição de thumbnail — fica disponível para o
+    # usuário no app mesmo depois que a thumbnail "ao vivo" volta a
+    # ser a anterior (auto ou último approved).
+    thumbnail_rejection_reason = Column(
+        Text,
+        nullable=True,
+    )
+
     user = relationship(
         "User",
         back_populates="videos",

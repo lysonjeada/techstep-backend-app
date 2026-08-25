@@ -110,3 +110,76 @@ Revisar:
         server.send_message(
             message
         )
+
+
+def send_thumbnail_review_email(
+    *,
+    title: str,
+    uploader_email: str,
+    review_url: str,
+):
+    message = EmailMessage()
+
+    message["Subject"] = (
+        f"Nova thumbnail aguardando revisão: {title}"
+    )
+
+    message["From"] = SMTP_FROM_EMAIL
+    message["To"] = VIDEO_REVIEW_EMAIL
+
+    message.set_content(
+        f"""
+Nova thumbnail de vídeo enviada para o TechStep.
+
+Vídeo:
+{title}
+
+Enviado por:
+{uploader_email}
+
+Revisar:
+{review_url}
+"""
+    )
+
+    message.add_alternative(
+        f"""
+        <html>
+            <body>
+                <h2>Nova thumbnail aguardando revisão</h2>
+
+                <p>
+                    <strong>Vídeo:</strong>
+                    {title}
+                </p>
+
+                <p>
+                    <strong>Enviado por:</strong>
+                    {uploader_email}
+                </p>
+
+                <p>
+                    <a href="{review_url}">
+                        Abrir página de revisão
+                    </a>
+                </p>
+            </body>
+        </html>
+        """,
+        subtype="html",
+    )
+
+    with smtplib.SMTP(
+        SMTP_HOST,
+        SMTP_PORT,
+    ) as server:
+        server.starttls()
+
+        server.login(
+            SMTP_USERNAME,
+            SMTP_PASSWORD,
+        )
+
+        server.send_message(
+            message
+        )

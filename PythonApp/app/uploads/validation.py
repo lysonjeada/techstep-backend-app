@@ -89,5 +89,17 @@ def is_allowed_video_content(content: bytes) -> bool:
     return looks_like_iso_bmff(content) or looks_like_webm(content)
 
 
+def looks_like_jpeg(content: bytes) -> bool:
+    return content[:3] == b"\xff\xd8\xff"
+
+
+def looks_like_png(content: bytes) -> bool:
+    return content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def is_allowed_image_content(content: bytes) -> bool:
+    return looks_like_jpeg(content) or looks_like_png(content)
+
+
 def is_allowed_audio_content(content: bytes) -> bool:
     return looks_like_iso_bmff(content)
