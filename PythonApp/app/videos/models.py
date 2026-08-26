@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -164,4 +165,101 @@ class Video(Base):
     user = relationship(
         "User",
         back_populates="videos",
+    )
+
+
+class VideoReaction(Base):
+    __tablename__ = "video_reactions"
+
+    # Um usuário só pode ter 1 reação por vídeo (like OU dislike) —
+    # reagir de novo troca a reação existente em vez de acumular
+    # linhas, garantido pela unique constraint abaixo.
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id",
+            "user_id",
+            name="uq_video_reactions_video_user",
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    video_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "videos.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    # "like" | "dislike"
+    reaction = Column(
+        String(10),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class VideoFavorite(Base):
+    __tablename__ = "video_favorites"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id",
+            "user_id",
+            name="uq_video_favorites_video_user",
+        ),
+    )
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    video_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "videos.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )

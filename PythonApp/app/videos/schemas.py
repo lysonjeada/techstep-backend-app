@@ -1,10 +1,20 @@
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
 )
+
+
+class ReactionType(str, Enum):
+    like = "like"
+    dislike = "dislike"
+
+
+class VideoReactionRequest(BaseModel):
+    reaction: ReactionType
 
 
 class VideoOut(BaseModel):
@@ -45,6 +55,23 @@ class VideoOut(BaseModel):
     # Mesmo conceito de next_resend_allowed_at, para o reenvio do
     # e-mail de revisão da thumbnail pendente.
     thumbnail_next_resend_allowed_at: datetime | None = None
+
+    # --- Reações e favoritos ---
+    #
+    # Só vêm preenchidos de verdade em endpoints com usuário
+    # autenticado que calculam esses valores explicitamente (detalhe
+    # do vídeo, reagir/favoritar, lista de favoritos) — nos demais
+    # (upload, meus vídeos, lista pública, revisão) ficam nos
+    # defaults abaixo, que não são exibidos pelo app nesses contextos.
+
+    likes_count: int = 0
+    dislikes_count: int = 0
+
+    # "like" | "dislike" | None — reação do usuário autenticado da
+    # requisição atual.
+    my_reaction: str | None = None
+
+    is_favorited: bool = False
 
     model_config = ConfigDict(
         from_attributes=True

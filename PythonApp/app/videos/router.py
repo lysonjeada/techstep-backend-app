@@ -235,6 +235,70 @@ def serialize_video(
     )
 
 
+def _attach_reactions(
+    video_out: schemas.VideoOut,
+    db: Session,
+    video_id: UUID,
+    current_user_id: UUID,
+) -> schemas.VideoOut:
+    """Calcula likes/dislikes/favorito para o usuário autenticado da
+    requisição e injeta no VideoOut já serializado. Isolado de
+    serialize_video porque só os endpoints com usuário autenticado no
+    contexto (detalhe, reagir, favoritar, lista de favoritos)
+    precisam disso — os demais (upload, meus vídeos, lista pública,
+    revisão) usam os defaults do schema."""
+
+    likes_count = (
+        db.query(models.VideoReaction)
+        .filter(
+            models.VideoReaction.video_id == video_id,
+            models.VideoReaction.reaction == "like",
+        )
+        .count()
+    )
+
+    dislikes_count = (
+        db.query(models.VideoReaction)
+        .filter(
+            models.VideoReaction.video_id == video_id,
+            models.VideoReaction.reaction == "dislike",
+        )
+        .count()
+    )
+
+    my_reaction_row = (
+        db.query(models.VideoReaction)
+        .filter(
+            models.VideoReaction.video_id == video_id,
+            models.VideoReaction.user_id == current_user_id,
+        )
+        .first()
+    )
+
+    is_favorited = (
+        db.query(models.VideoFavorite)
+        .filter(
+            models.VideoFavorite.video_id == video_id,
+            models.VideoFavorite.user_id == current_user_id,
+        )
+        .first()
+        is not None
+    )
+
+    return video_out.model_copy(
+        update={
+            "likes_count": likes_count,
+            "dislikes_count": dislikes_count,
+            "my_reaction": (
+                my_reaction_row.reaction
+                if my_reaction_row
+                else None
+            ),
+            "is_favorited": is_favorited,
+        }
+    )
+
+
 def validate_review_token(
     video: models.Video,
     token: str,
@@ -876,6 +940,315 @@ def get_approved_videos(
     )
 
 
+# MARK: Favorites
+#
+# Precisa ficar antes de "/{video_id}" (mais abaixo no arquivo) —
+# senão "/favorites" seria interpretado como um video_id inválido.
+
+
+@router.get(
+    "/favorites",
+    response_model=
+        schemas.VideoPageResponse,
+)
+def get_favorite_videos(
+    page: int = Query(
+        default=1,
+        ge=1,
+    ),
+
+    page_size: int = Query(
+        default=10,
+        ge=1,
+        le=50,
+    ),
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    query = (
+        db.query(models.Video)
+        .join(
+            models.VideoFavorite,
+            models.VideoFavorite.video_id
+            == models.Video.id,
+        )
+        .filter(
+            models.VideoFavorite.user_id
+            == current_user.id
+        )
+    )
+
+    total = query.count()
+
+    videos = (
+        query
+        .order_by(
+            models.VideoFavorite
+            .created_at.desc()
+        )
+        .offset(
+            (page - 1)
+            * page_size
+        )
+        .limit(page_size)
+        .all()
+    )
+
+    total_pages = (
+        math.ceil(
+            total / page_size
+        )
+        if total
+        else 0
+    )
+
+    return schemas.VideoPageResponse(
+        items=[
+            _attach_reactions(
+                serialize_video(video),
+                db,
+                video.id,
+                current_user.id,
+            )
+            for video in videos
+        ],
+
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=total_pages,
+        has_next=
+            page < total_pages,
+    )
+
+
+@router.post(
+    "/{video_id}/favorite",
+    response_model=schemas.VideoOut,
+)
+def add_video_favorite(
+    video_id: UUID,
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    video = (
+        db.query(models.Video)
+        .filter(
+            models.Video.id
+            == video_id
+        )
+        .first()
+    )
+
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=
+                "Vídeo não encontrado.",
+        )
+
+    already_favorited = (
+        db.query(models.VideoFavorite)
+        .filter(
+            models.VideoFavorite.video_id
+            == video_id,
+            models.VideoFavorite.user_id
+            == current_user.id,
+        )
+        .first()
+    )
+
+    if not already_favorited:
+        db.add(
+            models.VideoFavorite(
+                video_id=video_id,
+                user_id=current_user.id,
+            )
+        )
+
+        db.commit()
+
+    return _attach_reactions(
+        serialize_video(video),
+        db,
+        video_id,
+        current_user.id,
+    )
+
+
+@router.delete(
+    "/{video_id}/favorite",
+    response_model=schemas.VideoOut,
+)
+def remove_video_favorite(
+    video_id: UUID,
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    video = (
+        db.query(models.Video)
+        .filter(
+            models.Video.id
+            == video_id
+        )
+        .first()
+    )
+
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=
+                "Vídeo não encontrado.",
+        )
+
+    (
+        db.query(models.VideoFavorite)
+        .filter(
+            models.VideoFavorite.video_id
+            == video_id,
+            models.VideoFavorite.user_id
+            == current_user.id,
+        )
+        .delete()
+    )
+
+    db.commit()
+
+    return _attach_reactions(
+        serialize_video(video),
+        db,
+        video_id,
+        current_user.id,
+    )
+
+
+# MARK: Reactions
+
+
+@router.post(
+    "/{video_id}/reaction",
+    response_model=schemas.VideoOut,
+)
+def set_video_reaction(
+    video_id: UUID,
+
+    body: schemas.VideoReactionRequest,
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    video = (
+        db.query(models.Video)
+        .filter(
+            models.Video.id
+            == video_id
+        )
+        .first()
+    )
+
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=
+                "Vídeo não encontrado.",
+        )
+
+    existing = (
+        db.query(models.VideoReaction)
+        .filter(
+            models.VideoReaction.video_id
+            == video_id,
+            models.VideoReaction.user_id
+            == current_user.id,
+        )
+        .first()
+    )
+
+    # Só é permitida 1 reação (like OU dislike) por usuário por
+    # vídeo — reagir de novo troca a reação existente em vez de somar
+    # uma nova linha (a unique constraint no banco garante isso
+    # mesmo se essa checagem falhar por corrida).
+    if existing:
+        existing.reaction = body.reaction.value
+    else:
+        db.add(
+            models.VideoReaction(
+                video_id=video_id,
+                user_id=current_user.id,
+                reaction=body.reaction.value,
+            )
+        )
+
+    db.commit()
+
+    return _attach_reactions(
+        serialize_video(video),
+        db,
+        video_id,
+        current_user.id,
+    )
+
+
+@router.delete(
+    "/{video_id}/reaction",
+    response_model=schemas.VideoOut,
+)
+def remove_video_reaction(
+    video_id: UUID,
+
+    db: Session = Depends(get_db),
+
+    current_user: app_models.User =
+        Depends(get_current_user),
+):
+    video = (
+        db.query(models.Video)
+        .filter(
+            models.Video.id
+            == video_id
+        )
+        .first()
+    )
+
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=
+                "Vídeo não encontrado.",
+        )
+
+    (
+        db.query(models.VideoReaction)
+        .filter(
+            models.VideoReaction.video_id
+            == video_id,
+            models.VideoReaction.user_id
+            == current_user.id,
+        )
+        .delete()
+    )
+
+    db.commit()
+
+    return _attach_reactions(
+        serialize_video(video),
+        db,
+        video_id,
+        current_user.id,
+    )
+
+
 # MARK: Delete
 
 
@@ -1483,8 +1856,11 @@ def get_video(
                 "Você não pode visualizar este vídeo.",
         )
 
-    return serialize_video(
-        video
+    return _attach_reactions(
+        serialize_video(video),
+        db,
+        video.id,
+        current_user.id,
     )
 
 
