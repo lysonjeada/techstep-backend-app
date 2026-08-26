@@ -36,6 +36,9 @@ from app.videos.router import (
 from app.credits.router import (
     router as credits_router,
 )
+from app.articles.router import (
+    router as articles_router,
+)
 from app.rate_limit.service import _client_ip
 
 from app.observability import (
@@ -155,6 +158,7 @@ app.include_router(dashboard_router)
 app.include_router(tutors_router)
 app.include_router(videos_router)
 app.include_router(credits_router)
+app.include_router(articles_router)
 
 # Todos os models importados acima serão registrados neste metadata.
 database.Base.metadata.create_all(

@@ -22,6 +22,15 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/users/login/",
 )
 
+# auto_error=False: não levanta 401 quando não há header Authorization
+# (ou é inválido) — usado em rotas públicas que só precisam saber
+# QUEM é o usuário quando ele está logado (ex.: favoritos de artigo),
+# sem exigir login para acessar o recurso em si.
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/users/login/",
+    auto_error=False,
+)
+
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -75,6 +84,24 @@ def get_current_user(
         )
 
     return user
+
+
+def get_current_user_optional(
+    token: str | None = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db),
+) -> models.User | None:
+    if not token:
+        return None
+
+    try:
+        return get_current_user(
+            token=token,
+            db=db,
+        )
+    except HTTPException:
+        # Token ausente/expirado/inválido não deve derrubar uma rota
+        # pública — só significa que ninguém está autenticado nela.
+        return None
 
 
 # Compatibilidade com imports antigos.
