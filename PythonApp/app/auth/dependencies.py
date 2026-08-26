@@ -90,18 +90,21 @@ def get_current_user_optional(
     token: str | None = Depends(oauth2_scheme_optional),
     db: Session = Depends(get_db),
 ) -> models.User | None:
+    # Só a AUSÊNCIA de token é "convidado, sem erro". Um token
+    # presente mas expirado/inválido continua levantando 401 — se
+    # engolíssemos esse erro também, o cliente nunca saberia que
+    # precisa renovar o token (a renovação automática do app só
+    # dispara reagindo a um 401; sem ele, o servidor voltaria a
+    # tratar um usuário LOGADO como anônimo silenciosamente sempre
+    # que o access token vencesse, ex.: devolvendo is_favorited=false
+    # para quem já favoritou o recurso).
     if not token:
         return None
 
-    try:
-        return get_current_user(
-            token=token,
-            db=db,
-        )
-    except HTTPException:
-        # Token ausente/expirado/inválido não deve derrubar uma rota
-        # pública — só significa que ninguém está autenticado nela.
-        return None
+    return get_current_user(
+        token=token,
+        db=db,
+    )
 
 
 # Compatibilidade com imports antigos.
