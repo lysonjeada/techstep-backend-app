@@ -43,6 +43,32 @@ RESEND_VERIFICATION_WINDOW_SECONDS = int(
     os.getenv("RATE_LIMIT_RESEND_VERIFICATION_WINDOW_SECONDS", "60")
 )
 
+FORGOT_PASSWORD_MAX = int(os.getenv("RATE_LIMIT_FORGOT_PASSWORD_MAX", "5"))
+FORGOT_PASSWORD_WINDOW_SECONDS = int(
+    os.getenv("RATE_LIMIT_FORGOT_PASSWORD_WINDOW_SECONDS", "900")
+)
+
+# Limite adicional por e-mail normalizado (aplicado com check_rate_limit
+# diretamente no router, além do ip_rate_limiter acima) — evita que
+# alguém spamme a caixa de entrada de um e-mail específico mesmo
+# trocando de IP.
+FORGOT_PASSWORD_EMAIL_MAX = int(
+    os.getenv("RATE_LIMIT_FORGOT_PASSWORD_EMAIL_MAX", "3")
+)
+FORGOT_PASSWORD_EMAIL_WINDOW_SECONDS = int(
+    os.getenv("RATE_LIMIT_FORGOT_PASSWORD_EMAIL_WINDOW_SECONDS", "900")
+)
+
+VERIFY_RESET_CODE_MAX = int(os.getenv("RATE_LIMIT_VERIFY_RESET_CODE_MAX", "10"))
+VERIFY_RESET_CODE_WINDOW_SECONDS = int(
+    os.getenv("RATE_LIMIT_VERIFY_RESET_CODE_WINDOW_SECONDS", "60")
+)
+
+RESET_PASSWORD_MAX = int(os.getenv("RATE_LIMIT_RESET_PASSWORD_MAX", "10"))
+RESET_PASSWORD_WINDOW_SECONDS = int(
+    os.getenv("RATE_LIMIT_RESET_PASSWORD_WINDOW_SECONDS", "60")
+)
+
 VIDEO_UPLOAD_MAX = int(os.getenv("RATE_LIMIT_VIDEO_UPLOAD_MAX", "10"))
 VIDEO_UPLOAD_WINDOW_SECONDS = int(
     os.getenv("RATE_LIMIT_VIDEO_UPLOAD_WINDOW_SECONDS", "3600")

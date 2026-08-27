@@ -36,6 +36,11 @@ os.environ.setdefault("EMAIL_VERIFICATION_EXPIRATION_MINUTES", "10")
 os.environ.setdefault("EMAIL_VERIFICATION_RESEND_SECONDS", "60")
 os.environ.setdefault("EMAIL_VERIFICATION_MAX_ATTEMPTS", "5")
 
+os.environ.setdefault("PASSWORD_RESET_CODE_EXPIRATION_MINUTES", "10")
+os.environ.setdefault("PASSWORD_RESET_CODE_RESEND_SECONDS", "60")
+os.environ.setdefault("PASSWORD_RESET_CODE_MAX_ATTEMPTS", "5")
+os.environ.setdefault("PASSWORD_RESET_TOKEN_EXPIRATION_MINUTES", "10")
+
 os.environ.setdefault("GITHUB_TOKEN", "test-github-token")
 os.environ.setdefault("CELERY_BROKER_URL", "redis://localhost:6379/0")
 os.environ.setdefault("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
@@ -109,6 +114,32 @@ def _mock_verification_email(monkeypatch):
 
     monkeypatch.setattr(
         auth_router_module, "send_verification_email", _fake_send
+    )
+
+    return sent_emails
+
+
+@pytest.fixture(autouse=True)
+def _mock_password_reset_email(monkeypatch):
+    """Mesma ideia de _mock_verification_email, para o e-mail de
+    código de redefinição de senha disparado em background por
+    POST /users/forgot-password."""
+
+    import app.auth.router as auth_router_module
+
+    sent_emails = []
+
+    def _fake_send(recipient_email, recipient_name, code):
+        sent_emails.append(
+            {
+                "email": recipient_email,
+                "name": recipient_name,
+                "code": code,
+            }
+        )
+
+    monkeypatch.setattr(
+        auth_router_module, "send_password_reset_email", _fake_send
     )
 
     return sent_emails

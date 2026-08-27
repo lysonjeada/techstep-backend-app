@@ -167,6 +167,20 @@ class User(Base):
         passive_deletes=True,
     )
 
+    password_reset_codes = relationship(
+        "PasswordResetCode",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    password_reset_tokens = relationship(
+        "PasswordResetToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     videos = relationship(
     "Video",
     back_populates="user",

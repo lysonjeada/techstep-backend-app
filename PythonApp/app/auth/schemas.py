@@ -108,6 +108,41 @@ class TokenRefreshResponse(
     expires_in: int
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+
+
+class VerifyPasswordResetCodeRequest(BaseModel):
+    email: EmailStr
+
+    code: str = Field(
+        min_length=6,
+        max_length=6,
+        pattern=r"^\d{6}$",
+    )
+
+
+class VerifyPasswordResetCodeResponse(BaseModel):
+    reset_token: str
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+
+    new_password: str = Field(
+        min_length=8,
+        max_length=128,
+    )
+
+
+class ResetPasswordResponse(BaseModel):
+    message: str
+
+
 class UserPasswordUpdate(BaseModel):
     current_password: str
 

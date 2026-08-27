@@ -37,21 +37,30 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.auth.email_service import (
+    send_password_reset_email,
     send_verification_email,
 )
 from app.auth.schemas import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     ResendVerificationRequest,
     ResendVerificationResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
     VerifyEmailRequest,
     VerifyEmailResponse,
+    VerifyPasswordResetCodeRequest,
+    VerifyPasswordResetCodeResponse,
 )
 from app.auth.verification_service import (
     create_resend_code,
     create_verification_code,
     validate_verification_code,
 )
+from app.auth import password_reset_service
 from app.database import get_db
 from app.models import User
+from app.observability import logger
 
 from app.schemas import (
     AuthenticationLoginResponse,
@@ -61,14 +70,23 @@ from app.auth.token_service import (
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 )
 from app.rate_limit.service import (
+    FORGOT_PASSWORD_EMAIL_MAX,
+    FORGOT_PASSWORD_EMAIL_WINDOW_SECONDS,
+    FORGOT_PASSWORD_MAX,
+    FORGOT_PASSWORD_WINDOW_SECONDS,
     LOGIN_MAX,
     LOGIN_WINDOW_SECONDS,
     REGISTER_MAX,
     REGISTER_WINDOW_SECONDS,
     RESEND_VERIFICATION_MAX,
     RESEND_VERIFICATION_WINDOW_SECONDS,
+    RESET_PASSWORD_MAX,
+    RESET_PASSWORD_WINDOW_SECONDS,
     VERIFY_EMAIL_MAX,
     VERIFY_EMAIL_WINDOW_SECONDS,
+    VERIFY_RESET_CODE_MAX,
+    VERIFY_RESET_CODE_WINDOW_SECONDS,
+    check_rate_limit,
     ip_rate_limiter,
 )
 
@@ -368,6 +386,223 @@ def resend_verification_code(
         ),
         retry_after_seconds=retry_after,
     )
+
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+)
+def forgot_password(
+    request: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "forgot-password",
+            FORGOT_PASSWORD_MAX,
+            FORGOT_PASSWORD_WINDOW_SECONDS,
+        )
+    ),
+):
+    normalized_email = (
+        request.email.strip().lower()
+    )
+
+    # Limite adicional por e-mail (além do IP acima) — não revela
+    # existência: a mesma checagem roda com ou sem conta cadastrada.
+    check_rate_limit(
+        db,
+        f"forgot-password:email:{normalized_email}",
+        FORGOT_PASSWORD_EMAIL_MAX,
+        FORGOT_PASSWORD_EMAIL_WINDOW_SECONDS,
+    )
+
+    # Resposta sempre idêntica (mensagem + status 200), exista ou não
+    # o e-mail — protege contra enumeração de contas cadastradas.
+    generic_message = (
+        "Se o e-mail estiver cadastrado, enviaremos um código "
+        "para redefinição da senha."
+    )
+
+    user = (
+        db.query(User)
+        .filter(User.email == normalized_email)
+        .first()
+    )
+
+    if user is not None and user.is_active:
+        code = None
+
+        try:
+            code, _ = password_reset_service.create_resend_code(
+                db=db,
+                user=user,
+            )
+        except HTTPException as error:
+            # Já existe um código recente (cooldown): não revela isso
+            # ao chamador, só evita mandar outro e-mail agora.
+            if (
+                error.status_code
+                != status.HTTP_429_TOO_MANY_REQUESTS
+            ):
+                raise
+
+        if code is not None:
+            background_tasks.add_task(
+                send_password_reset_email,
+                user.email,
+                user.username,
+                code,
+            )
+
+        logger.info(
+            "password_reset_requested",
+            extra={"event": "password_reset_requested"},
+        )
+
+    return ForgotPasswordResponse(
+        message=generic_message
+    )
+
+
+@router.post(
+    "/verify-reset-code",
+    response_model=VerifyPasswordResetCodeResponse,
+)
+def verify_reset_code(
+    request: VerifyPasswordResetCodeRequest,
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "verify-reset-code",
+            VERIFY_RESET_CODE_MAX,
+            VERIFY_RESET_CODE_WINDOW_SECONDS,
+        )
+    ),
+):
+    normalized_email = (
+        request.email.strip().lower()
+    )
+
+    user = (
+        db.query(User)
+        .filter(User.email == normalized_email)
+        .first()
+    )
+
+    if user is None:
+        # Mesma mensagem/status de "código inválido" — não revela se
+        # o e-mail existe.
+        logger.info(
+            "password_reset_code_verification_failed",
+            extra={
+                "event":
+                    "password_reset_code_verification_failed"
+            },
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=password_reset_service.INVALID_CODE_MESSAGE,
+        )
+
+    try:
+        reset_token = (
+            password_reset_service
+            .validate_reset_code_and_issue_token(
+                db=db,
+                user=user,
+                code=request.code,
+            )
+        )
+    except HTTPException:
+        logger.info(
+            "password_reset_code_verification_failed",
+            extra={
+                "event":
+                    "password_reset_code_verification_failed"
+            },
+        )
+        raise
+
+    logger.info(
+        "password_reset_code_verified",
+        extra={"event": "password_reset_code_verified"},
+    )
+
+    return VerifyPasswordResetCodeResponse(
+        reset_token=reset_token
+    )
+
+
+@router.post(
+    "/reset-password",
+    response_model=ResetPasswordResponse,
+)
+def reset_password(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(
+        ip_rate_limiter(
+            "reset-password",
+            RESET_PASSWORD_MAX,
+            RESET_PASSWORD_WINDOW_SECONDS,
+        )
+    ),
+):
+    try:
+        user = (
+            password_reset_service
+            .consume_reset_token(
+                db=db,
+                raw_token=request.reset_token,
+            )
+        )
+
+        user.hashed_password = hash_password(
+            request.new_password
+        )
+
+        revoke_all_refresh_tokens_for_user(
+            db,
+            user.id,
+        )
+
+        password_reset_service.invalidate_active_reset_artifacts_for_user(
+            db=db,
+            user_id=user.id,
+        )
+
+        db.commit()
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception:
+        db.rollback()
+
+        logger.exception(
+            "password_reset_failed",
+            extra={"event": "password_reset_failed"},
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Não foi possível redefinir a senha. "
+                "Tente novamente."
+            ),
+        )
+
+    logger.info(
+        "password_reset_completed",
+        extra={"event": "password_reset_completed"},
+    )
+
+    return ResetPasswordResponse(
+        message="Senha redefinida com sucesso."
+    )
+
 
 @router.post(
     "/login/",
