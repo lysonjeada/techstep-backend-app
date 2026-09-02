@@ -23,6 +23,8 @@ from openai import OpenAI
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app import models as app_models
+from app.auth.dependencies import get_current_user
 from app.database import get_db
 from app.observability import logger
 
@@ -34,6 +36,7 @@ from app.interview_simulation.models import (
 from app.interview_simulation.schemas import (
     SaveGeneratedQuestionsRequest,
     SaveGeneratedQuestionsResponse,
+    SavedQuestionSetOut,
     SimulationEvaluationRequest,
     SimulationEvaluationResponse,
     SimulationQuestionsRequest,
@@ -1212,6 +1215,9 @@ def save_generated_questions(
     db: Session = Depends(
         get_db
     ),
+    current_user: app_models.User = Depends(
+        get_current_user
+    ),
 ):
     started_at = time.perf_counter()
 
@@ -1308,6 +1314,8 @@ def save_generated_questions(
                     job_title,
                 seniority=
                     seniority,
+                user_id=
+                    current_user.id,
             )
         )
 
@@ -1490,5 +1498,120 @@ def save_generated_questions(
             status_code=500,
             detail=(
                 "Erro ao salvar perguntas."
+            ),
+        ) from error
+
+
+# MARK: - List Saved Questions
+
+
+@router.get(
+    "/interview-simulation/saved-questions",
+    response_model=
+        list[SavedQuestionSetOut],
+)
+def list_saved_questions(
+    db: Session = Depends(
+        get_db
+    ),
+    current_user: app_models.User = Depends(
+        get_current_user
+    ),
+):
+    started_at = time.perf_counter()
+
+    logger.info(
+        "saved question sets list request started",
+        extra={
+            "event":
+                "saved_question_sets_list_started",
+            "userId":
+                str(current_user.id),
+        },
+    )
+
+    try:
+        question_sets = (
+            db.query(
+                InterviewQuestionSet
+            )
+            .filter(
+                InterviewQuestionSet.user_id
+                == current_user.id
+            )
+            .order_by(
+                InterviewQuestionSet
+                .created_at
+                .desc()
+            )
+            .all()
+        )
+
+        result = [
+            SavedQuestionSetOut(
+                id=question_set.id,
+                job_title=question_set.job_title,
+                seniority=question_set.seniority,
+                questions=[
+                    question.text
+                    for question in question_set.questions
+                ],
+                created_at=question_set.created_at,
+            )
+            for question_set in question_sets
+        ]
+
+        duration_ms = round(
+            (
+                time.perf_counter()
+                - started_at
+            )
+            * 1000,
+            2,
+        )
+
+        logger.info(
+            "saved question sets retrieved successfully",
+            extra={
+                "event":
+                    "saved_question_sets_list_retrieved",
+                "userId":
+                    str(current_user.id),
+                "questionSetCount":
+                    len(result),
+                "durationMs":
+                    duration_ms,
+            },
+        )
+
+        return result
+
+    except Exception as error:
+        duration_ms = round(
+            (
+                time.perf_counter()
+                - started_at
+            )
+            * 1000,
+            2,
+        )
+
+        logger.exception(
+            "failed to retrieve saved question sets",
+            extra={
+                "event":
+                    "saved_question_sets_list_failed",
+                "userId":
+                    str(current_user.id),
+                "durationMs":
+                    duration_ms,
+            },
+        )
+
+        raise HTTPException(
+            status_code=
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Erro ao buscar perguntas salvas."
             ),
         ) from error
