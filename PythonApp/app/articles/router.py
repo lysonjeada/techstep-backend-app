@@ -69,10 +69,22 @@ def get_articles(
         else None
     )
 
-    return _fetch_from_devto(
+    data = _fetch_from_devto(
         "/articles",
         params=params,
     )
+
+    if not isinstance(data, list):
+        # O dev.to já respondeu 200 com um corpo de erro no formato
+        # {"error": ..., "status": ...} em vez de retornar o status
+        # HTTP correto (ex: rate limit) — sem essa checagem isso
+        # passaria pro cliente como se fosse uma lista de artigos.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Não foi possível buscar os artigos.",
+        )
+
+    return data
 
 
 # MARK: Favorites
