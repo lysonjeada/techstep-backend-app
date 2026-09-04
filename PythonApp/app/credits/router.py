@@ -12,13 +12,19 @@ from .apple_verification import (
     ApplePurchaseVerificationError,
     verify_signed_transaction,
 )
-from .config import AI_CREDIT_PRODUCTS
+from .config import AI_CREDIT_PRODUCTS, AI_CREDIT_PRODUCTS_GOOGLE
+from .google_verification import (
+    GooglePurchaseVerificationError,
+    verify_purchase_token,
+)
 from .schemas import (
     AICreditBalanceResponse,
     ApplePurchaseRequest,
     ApplePurchaseResponse,
+    GooglePurchaseRequest,
+    GooglePurchaseResponse,
 )
-from .service import get_balance, record_apple_purchase
+from .service import get_balance, record_apple_purchase, record_google_purchase
 
 
 router = APIRouter(prefix="/ai-credits", tags=["AI Credits"])
@@ -188,6 +194,140 @@ async def register_apple_purchase(
     )
 
     return ApplePurchaseResponse(
+        credits_added=credits_granted,
+        balance=balance,
+        already_processed=False,
+    )
+
+
+# MARK: - Google Play Purchases
+
+
+@router.post(
+    "/google/purchases", response_model=GooglePurchaseResponse
+)
+async def register_google_purchase(
+    payload: GooglePurchaseRequest,
+    db: Session = Depends(get_db),
+    current_user: app_models.User = Depends(get_current_user),
+) -> GooglePurchaseResponse:
+    logger.info(
+        "ai credit purchase received",
+        extra={
+            "event": "ai_credit_purchase_received",
+            "userId": str(current_user.id),
+            "clientProductId": payload.product_id,
+            "provider": "google",
+        },
+    )
+
+    # A verificação faz uma chamada síncrona à Google Play Developer
+    # API — roda em thread pool, igual à verificação Apple acima.
+    try:
+        verified = await asyncio.to_thread(
+            verify_purchase_token,
+            payload.product_id,
+            payload.purchase_token,
+        )
+    except GooglePurchaseVerificationError as error:
+        logger.warning(
+            "ai credit purchase rejected: invalid google transaction",
+            extra={
+                "event": "ai_credit_purchase_invalid_transaction",
+                "userId": str(current_user.id),
+                "provider": "google",
+            },
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_GOOGLE_PURCHASE",
+                "message": (
+                    "Não foi possível validar a compra com o Google Play."
+                ),
+            },
+        ) from error
+
+    # A fonte da verdade é sempre o resultado verificado — nunca o
+    # product_id/quantidade que o cliente mandou no corpo (mesmo que,
+    # ao contrário da Apple, o product_id do payload também tenha sido
+    # usado para consultar a API: um product_id incorreto simplesmente
+    # faz a verificação acima falhar).
+    product_id = verified.product_id
+    google_order_id = verified.order_id
+
+    credits_granted = AI_CREDIT_PRODUCTS_GOOGLE.get(product_id)
+
+    if credits_granted is None:
+        logger.warning(
+            "ai credit purchase rejected: unknown product",
+            extra={
+                "event": "ai_credit_purchase_unknown_product",
+                "userId": str(current_user.id),
+                "productId": product_id,
+                "provider": "google",
+            },
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "UNKNOWN_PRODUCT",
+                "message": "Produto desconhecido.",
+            },
+        )
+
+    logger.info(
+        "ai credit purchase verified",
+        extra={
+            "event": "ai_credit_purchase_verified",
+            "userId": str(current_user.id),
+            "productId": product_id,
+            "googleOrderId": google_order_id,
+            "creditsGranted": credits_granted,
+            "provider": "google",
+        },
+    )
+
+    balance, already_processed = record_google_purchase(
+        db,
+        user_id=current_user.id,
+        google_order_id=google_order_id,
+        product_id=product_id,
+        credits_granted=credits_granted,
+    )
+
+    if already_processed:
+        logger.info(
+            "ai credit purchase duplicate",
+            extra={
+                "event": "ai_credit_purchase_duplicate",
+                "userId": str(current_user.id),
+                "googleOrderId": google_order_id,
+                "provider": "google",
+            },
+        )
+
+        return GooglePurchaseResponse(
+            credits_added=0,
+            balance=balance,
+            already_processed=True,
+        )
+
+    logger.info(
+        "ai credit purchase granted",
+        extra={
+            "event": "ai_credit_purchase_granted",
+            "userId": str(current_user.id),
+            "googleOrderId": google_order_id,
+            "creditsGranted": credits_granted,
+            "balance": balance,
+            "provider": "google",
+        },
+    )
+
+    return GooglePurchaseResponse(
         credits_added=credits_granted,
         balance=balance,
         already_processed=False,

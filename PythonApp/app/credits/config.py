@@ -39,3 +39,13 @@ AI_CREDIT_PRODUCTS: dict[str, int] = {
     "lys.com.career-app.credits.30": 30,
     "lys.com.career-app.credits.100": 100,
 }
+
+# Mesma ideia para compras Android via Google Play Billing. Os IDs abaixo
+# são PLACEHOLDERS — o app Android ainda não tem produtos cadastrados no
+# Play Console. Troque pelos IDs reais assim que forem criados lá (e
+# replique a troca em AICreditProduct no app Android).
+AI_CREDIT_PRODUCTS_GOOGLE: dict[str, int] = {
+    "credits_10": 10,
+    "credits_30": 30,
+    "credits_100": 100,
+}

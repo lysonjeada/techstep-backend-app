@@ -99,3 +99,46 @@ class AICreditPurchase(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+class AICreditPurchaseGoogle(Base):
+    """Ledger auditável de compras Google Play — mesmo padrão de
+    AICreditPurchase (Apple): UNIQUE em google_order_id é o que garante
+    idempotência (o INSERT falha com IntegrityError num reenvio, nunca
+    um SELECT-then-INSERT)."""
+
+    __tablename__ = "ai_credit_purchases_google"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    google_order_id = Column(
+        String(255),
+        nullable=False,
+        unique=True,
+    )
+
+    product_id = Column(
+        String(255),
+        nullable=False,
+    )
+
+    credits_granted = Column(
+        Integer,
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

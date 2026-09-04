@@ -167,6 +167,44 @@ def record_apple_purchase(
     return balance, False
 
 
+def record_google_purchase(
+    db: Session,
+    *,
+    user_id: UUID,
+    google_order_id: str,
+    product_id: str,
+    credits_granted: int,
+) -> tuple[int, bool]:
+    """Equivalente a record_apple_purchase, para compras Google Play —
+    mesma garantia de idempotência via UNIQUE em google_order_id.
+
+    Retorna (balance, already_processed).
+    """
+
+    from .models import AICreditPurchaseGoogle
+
+    purchase = AICreditPurchaseGoogle(
+        user_id=user_id,
+        google_order_id=google_order_id,
+        product_id=product_id,
+        credits_granted=credits_granted,
+    )
+
+    db.add(purchase)
+
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+
+        return get_balance(db, user_id), True
+
+    balance = _credit_no_commit(db, user_id, credits_granted)
+    db.commit()
+
+    return balance, False
+
+
 # --- gate de consumo: estende o rate limit existente com créditos ---
 
 

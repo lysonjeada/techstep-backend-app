@@ -17,3 +17,5 @@ pwdlib[argon2]
 PyJWT
 pymupdf
 app-store-server-library
+google-api-python-client
+google-auth
